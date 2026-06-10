@@ -4,7 +4,7 @@ import bcrypt from "bcrypt";
 
 import { generateToken } from "../lib/jwt";
 
-import { registerSchema } from "../validators/auth.validator";
+import { registerSchema, loginSchema } from "../validators/auth.validator";
 
 import { findUserByEmail, createUser } from "../repositories/user.repository";
 
@@ -28,16 +28,19 @@ export const register = async (req: Request, res: Response) => {
       user,
     });
   } catch (error) {
+    console.error(error);
+
     return res.status(400).json({
-      error,
+      message: "Invalid request",
     });
   }
 };
 
 export const login = async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const data = loginSchema.parse(req.body);
 
+    const { email, password } = data;
     const user = await findUserByEmail(email);
 
     if (!user) {
@@ -60,8 +63,10 @@ export const login = async (req: Request, res: Response) => {
       token,
     });
   } catch (error) {
+    console.error(error);
+
     return res.status(400).json({
-      error,
+      message: "Invalid request",
     });
   }
 };
