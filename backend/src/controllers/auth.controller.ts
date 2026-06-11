@@ -10,6 +10,8 @@ import { findUserByEmail, createUser } from "../repositories/user.repository";
 
 export const register = async (req: Request, res: Response) => {
   try {
+    console.log("BODY:", req.body);
+
     const data = registerSchema.parse(req.body);
 
     const existingUser = await findUserByEmail(data.email);
@@ -24,14 +26,13 @@ export const register = async (req: Request, res: Response) => {
 
     const user = await createUser(data.username, data.email, passwordHash);
 
-    return res.status(201).json({
-      user,
-    });
+    return res.status(201).json({ user });
   } catch (error) {
-    console.error(error);
+    console.error("REGISTER ERROR:", error);
 
     return res.status(400).json({
       message: "Invalid request",
+      error,
     });
   }
 };
