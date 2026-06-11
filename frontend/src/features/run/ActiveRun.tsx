@@ -1,0 +1,220 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useStartRun, useFinishRun, useCheckLoop } from "../../hooks/queries/useRuns";
+import { useRunStore } from "../../store/run.store";
+import { useGeolocation } from "../../hooks/useGeolocation";
+import CityMap from "../map/components/CityMap";
+import UserMarker from "../map/components/UserMarker";
+import RoutePolyline from "../map/components/RoutePolyline";
+import TerritoryPolygon from "../map/components/TerritoryPolygon";
+import { Button } from "../../components/ui/Button";
+import { Card } from "../../components/ui/Card";
+import { StopCircle, MapPin, Loader2, ArrowLeft, WifiOff, AlertTriangle } from "lucide-react";
+
+export function ActiveRun() {
+  const navigate = useNavigate();
+  const { mutate: startRun, isPending: starting } = useStartRun();
+  const { mutateAsync: finishRun, isPending: finishing } = useFinishRun();
+  const { currentRunId, isTracking, routePoints, startTracking, stopTracking, resetRun } = useRunStore();
+  const [showSummary, setShowSummary] = useState(false);
+  const [finishedRunId, setFinishedRunId] = useState<string | null>(null);
+
+  // Geolocation hook — now surfaces errors
+  const { gpsStatus, gpsError } = useGeolocation();
+
+  // Loop checking only after run is finished
+  const { data: loopData, isLoading: checkingLoop } = useCheckLoop(showSummary ? finishedRunId : null);
+
+  // Auto-start run on mount if not already tracking
+  useEffect(() => {
+    if (!isTracking && !showSummary) {
+      startRun(undefined, {
+        onSuccess: (data) => {
+          startTracking(data.id);
+        },
+        onError: () => {
+          alert("Failed to start run. Is the backend running?");
+          navigate("/");
+        },
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
+
+  const handleStopRun = async () => {
+    if (!currentRunId) return;
+
+    const idToFinish = currentRunId;
+    stopTracking();
+
+    try {
+      await finishRun(idToFinish);
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || "";
+      // 400 "Run contains no GPS points" — still show summary, just no distance
+      if (err?.response?.status !== 400 || msg !== "Run contains no GPS points") {
+        alert("Failed to finish run cleanly.");
+        resetRun();
+        navigate("/");
+        return;
+      }
+    }
+
+    setFinishedRunId(idToFinish);
+    setShowSummary(true);
+  };
+
+  const handleClose = () => {
+    resetRun();
+    navigate("/");
+  };
+
+  const currentLocation = routePoints[routePoints.length - 1];
+  // Default map center (Mumbai — change to your city if you prefer)
+  const mapCenter = currentLocation
+    ? { lat: currentLocation.latitude, lng: currentLocation.longitude }
+    : { lat: 19.076, lng: 72.8777 };
+
+  // ── Summary Screen ──────────────────────────────────────────────────
+  if (showSummary) {
+    return (
+      <div className="flex-1 flex flex-col p-4 pt-12 space-y-6 overflow-y-auto">
+        <header className="flex items-center">
+          <button onClick={handleClose} className="p-2 -ml-2 rounded-full hover:bg-slate-800">
+            <ArrowLeft className="w-6 h-6" />
+          </button>
+          <h1 className="text-3xl font-bold ml-2">Run Completed</h1>
+        </header>
+
+        <Card className="bg-slate-900 border-slate-800 p-6 flex flex-col items-center justify-center space-y-4">
+          <h2 className="text-xl font-semibold text-slate-300">Territory Status</h2>
+
+          {checkingLoop ? (
+            <div className="flex flex-col items-center space-y-2 text-blue-400">
+              <Loader2 className="w-8 h-8 animate-spin" />
+              <p>Analyzing route for loops...</p>
+            </div>
+          ) : loopData?.loop_detected ? (
+            <div className="text-center space-y-2">
+              <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/50">
+                <MapPin className="w-10 h-10 text-emerald-400" />
+              </div>
+              <p className="text-2xl font-bold text-emerald-400">Territory Captured!</p>
+              <p className="text-slate-400">Area: {Math.round(loopData.area_m2 || 0)} m²</p>
+              <p className="text-slate-500 text-sm">Gap: {Math.round(loopData.gap_m || 0)}m</p>
+            </div>
+          ) : routePoints.length === 0 ? (
+            <div className="text-center space-y-2">
+              <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
+                <WifiOff className="w-10 h-10 text-amber-400" />
+              </div>
+              <p className="text-xl font-semibold text-slate-300">No GPS Data Recorded</p>
+              <p className="text-sm text-slate-500">Enable location permissions and try again.</p>
+            </div>
+          ) : (
+            <div className="text-center space-y-2">
+              <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                <MapPin className="w-10 h-10 text-slate-500" />
+              </div>
+              <p className="text-xl font-semibold text-slate-300">No Territory Captured</p>
+              {loopData?.reason && <p className="text-sm text-slate-500">{loopData.reason}</p>}
+              {loopData?.gap_m != null && (
+                <p className="text-sm text-slate-500">
+                  Gap to start: {Math.round(loopData.gap_m)}m (needs &lt;30m)
+                </p>
+              )}
+            </div>
+          )}
+        </Card>
+
+        {/* Mini-map of the run */}
+        {routePoints.length > 0 && (
+          <div className="h-64 rounded-3xl overflow-hidden relative border border-slate-800">
+            <CityMap center={mapCenter}>
+              <RoutePolyline points={routePoints.map((p) => ({ lat: p.latitude, lng: p.longitude }))} />
+              {loopData?.loop_detected && (
+                <TerritoryPolygon points={routePoints.map((p) => ({ lat: p.latitude, lng: p.longitude }))} />
+              )}
+            </CityMap>
+          </div>
+        )}
+
+        <Button onClick={handleClose} className="w-full">
+          Back to Home
+        </Button>
+      </div>
+    );
+  }
+
+  // ── Active Run Screen ───────────────────────────────────────────────
+  return (
+    <div className="flex-1 relative flex flex-col h-full w-full">
+      {/* Full-screen map — always visible */}
+      <div className="absolute inset-0 z-0">
+        <CityMap center={mapCenter}>
+          {currentLocation && (
+            <UserMarker position={{ lat: currentLocation.latitude, lng: currentLocation.longitude }} />
+          )}
+          {routePoints.length > 0 && (
+            <RoutePolyline points={routePoints.map((p) => ({ lat: p.latitude, lng: p.longitude }))} />
+          )}
+        </CityMap>
+      </div>
+
+      {/* GPS Error Banner */}
+      {gpsStatus === "error" && gpsError && (
+        <div className="absolute top-16 left-4 right-4 z-30 bg-red-900/80 border border-red-700 backdrop-blur-md rounded-2xl px-4 py-3 flex items-start space-x-3 shadow-lg">
+          <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+          <p className="text-sm text-red-200">{gpsError.message}</p>
+        </div>
+      )}
+
+      {/* Floating overlays */}
+      <div className="relative z-10 flex flex-col justify-between h-full p-4 pointer-events-none pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+        {/* Top HUD */}
+        <div className="flex justify-between items-start pt-[env(safe-area-inset-top)]">
+          <div className="glass px-4 py-2 rounded-full flex items-center space-x-2 pointer-events-auto shadow-lg">
+            {gpsStatus === "active" ? (
+              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            ) : gpsStatus === "locating" ? (
+              <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+            ) : (
+              <WifiOff className="w-3 h-3 text-red-400" />
+            )}
+            <span className="font-semibold tracking-wider text-sm">
+              {gpsStatus === "active" ? "REC" : gpsStatus === "locating" ? "GPS..." : "NO GPS"}
+            </span>
+          </div>
+          <div className="glass px-4 py-2 rounded-full pointer-events-auto shadow-lg">
+            <span className="font-mono">{routePoints.length} PTS</span>
+          </div>
+        </div>
+
+        {/* Loading overlay pill — shown only when starting or awaiting first GPS fix */}
+        {(starting || (isTracking && gpsStatus === "locating" && routePoints.length === 0)) && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 glass-card px-6 py-3 rounded-full flex items-center space-x-3 shadow-2xl pointer-events-none">
+            <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
+            <span className="font-medium text-sm text-slate-200">
+              {starting ? "Starting run…" : "Acquiring GPS…"}
+            </span>
+          </div>
+        )}
+
+        {/* Stop button */}
+        <div className="flex justify-center w-full pointer-events-auto">
+          <button
+            onClick={handleStopRun}
+            disabled={finishing}
+            className="flex items-center justify-center w-20 h-20 bg-red-500 hover:bg-red-600 rounded-full shadow-2xl shadow-red-900/50 transition-transform transform active:scale-90 border-4 border-slate-900 disabled:opacity-50"
+          >
+            {finishing ? (
+              <Loader2 className="w-8 h-8 animate-spin text-white" />
+            ) : (
+              <StopCircle className="w-10 h-10 text-white" fill="currentColor" />
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

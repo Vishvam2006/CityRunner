@@ -1,9 +1,9 @@
-import { db } from "../lib/db";
+import { pool } from "../db/postgres";
 
 export async function findUserByEmail(
   email: string
 ) {
-  const result = await db.query(
+  const result = await pool.query(
     `
     SELECT *
     FROM users
@@ -20,7 +20,7 @@ export async function createUser(
   email: string,
   passwordHash: string
 ) {
-  const result = await db.query(
+  const result = await pool.query(
     `
     INSERT INTO users
     (

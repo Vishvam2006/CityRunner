@@ -95,7 +95,7 @@ export const getRun = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const runId = req.params.runId;
+    const runId = req.params.runId as string;
 
     const run = await validateRunOwnership(runId, userId);
 

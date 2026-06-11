@@ -1,10 +1,3 @@
-// import "./types/express";
-import app from "./app";
-import { env } from "./lib/env";
-
-
-app.listen(Number(env.PORT), () => {
-  console.log(
-    `Server running on port ${env.PORT}`
-  );
-}); 
+// Entry point — app.ts handles server startup (connectDB + app.listen).
+// This file exists only to satisfy any tooling that expects a server.ts entrypoint.
+import "./app";

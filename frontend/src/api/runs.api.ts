@@ -1,0 +1,25 @@
+import { apiClient } from "./client";
+import { Run, GpsPoint, FinishRunResponse } from "../types";
+
+export const runsApi = {
+  start: async (): Promise<Run> => {
+    const res = await apiClient.post<Run>("/runs/start");
+    return res.data;
+  },
+  savePoint: async (runId: string, point: { latitude: number; longitude: number; accuracy?: number | null; speed?: number | null }): Promise<GpsPoint> => {
+    const res = await apiClient.post<GpsPoint>(`/runs/${runId}/points`, point);
+    return res.data;
+  },
+  getRun: async (runId: string): Promise<{ runId: string; points: GpsPoint[] }> => {
+    const res = await apiClient.get<{ runId: string; points: GpsPoint[] }>(`/runs/${runId}`);
+    return res.data;
+  },
+  getDistance: async (runId: string): Promise<{ runId: string; distanceKm: number }> => {
+    const res = await apiClient.get<{ runId: string; distanceKm: number }>(`/runs/${runId}/distance`);
+    return res.data;
+  },
+  finish: async (runId: string): Promise<FinishRunResponse> => {
+    const res = await apiClient.post<FinishRunResponse>(`/runs/${runId}/finish`);
+    return res.data;
+  },
+};
