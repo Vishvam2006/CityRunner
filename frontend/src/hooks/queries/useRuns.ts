@@ -10,7 +10,7 @@ export const useStartRun = () => {
 
 export const useSavePoint = () => {
   return useMutation({
-    mutationFn: ({ runId, point }: { runId: string; point: { latitude: number; longitude: number; accuracy?: number | null; speed?: number | null } }) =>
+    mutationFn: ({ runId, point }: { runId: string; point: { latitude: number; longitude: number; accuracy?: number | null; speed?: number | null; sequence_number: number; client_timestamp: string } }) =>
       runsApi.savePoint(runId, point),
   });
 };

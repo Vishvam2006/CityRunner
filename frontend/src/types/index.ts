@@ -46,6 +46,7 @@ export interface FinishRunResponse {
   totalPoints: number;
   distanceKm: number;
   status: string;
+  fraudScore?: number;
 }
 
 export interface TerritoryLoopResponse {
