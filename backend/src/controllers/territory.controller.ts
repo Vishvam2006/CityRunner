@@ -2,7 +2,11 @@ import { Response } from "express";
 
 import { pool } from "../db/postgres";
 import { AuthRequest } from "../types/auth-request";
-import { findRunByIdAndUserId, getRunPoints } from "../repositories/run.repository";
+import {
+  findRunByIdAndUserId,
+  getRunPoints,
+} from "../repositories/run.repository";
+import { createTerritoryRepo } from "../repositories/territory.repository";
 
 // Minimum number of GPS points before we even attempt loop detection.
 const MIN_POINTS = 10;
@@ -19,10 +23,7 @@ const LOOP_CLOSE_THRESHOLD_M = 30;
  *   2. Check whether the start and end are within LOOP_CLOSE_THRESHOLD_M metres.
  *   3. If so, close the ring, build a POLYGON, and return its area in m².
  */
-export const checkLoop = async (
-  req: AuthRequest,
-  res: Response
-) => {
+export const checkLoop = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
 
@@ -59,8 +60,15 @@ export const checkLoop = async (
     // Build a WKT LINESTRING from the stored latitude/longitude values.
     // PostGIS expects (longitude latitude) order.
     const wktPoints = points
-      .map((p: { latitude: number; longitude: number }) => `${p.longitude} ${p.latitude}`)
+      .map(
+        (p: { latitude: number; longitude: number }) =>
+          `${p.longitude} ${p.latitude}`,
+      )
       .join(", ");
+
+    const polygonWkt = `POLYGON((${wktPoints},
+  ${points[0].longitude}
+  ${points[0].latitude}))`;
 
     const query = `
       WITH
@@ -113,6 +121,8 @@ export const checkLoop = async (
       gap_m: parseFloat(row.gap_m),
       area_m2: row.area_m2 !== null ? parseFloat(row.area_m2) : null,
       point_count: points.length,
+
+      polygonWkt: row.loop_detected ? polygonWkt : null,
     });
   } catch (error) {
     console.error(error);
@@ -120,6 +130,40 @@ export const checkLoop = async (
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
+    });
+  }
+};
+
+export const createTerritory = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    const { polygonWkt, area } = req.body;
+
+    const territory = await createTerritoryRepo(userId, polygonWkt, area);
+
+    return res.status(201).json(territory);
+  } catch (error) {}
+};
+
+import { getTerritories as getTerritoriesRepo } from "../repositories/territory.repository";
+
+export const getTerritories = async (req: AuthRequest, res: Response) => {
+  try {
+    const territories = await getTerritoriesRepo();
+
+    return res.status(200).json(territories);
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Failed to fetch territories",
     });
   }
 };

@@ -18,6 +18,10 @@ app.get("/health", (_, res) => {
 app.use("/api/auth", authRouter);
 app.use("/api/runs", runRouter);
 app.use("/api/territory", territoryRouter);
+
+
+
+
 const startServer = async () => {
   await connectDB();
 

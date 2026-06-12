@@ -1,19 +1,26 @@
 import { Polygon } from "@react-google-maps/api";
 
-import type { Coordinate } from "../types/map.types";
+import { getUserColor } from "../utils/getUserColor";
 
-interface TerritoryPolygonProps {
-  points: Coordinate[];
+interface Props {
+  coordinates: {
+    lat: number;
+    lng: number;
+  }[];
+
+  userId: string;
 }
 
-export default function TerritoryPolygon({ points }: TerritoryPolygonProps) {
+export default function TerritoryPolygon({ coordinates, userId }: Props) {
+  const color = getUserColor(userId);
+
   return (
     <Polygon
-      paths={points}
+      paths={coordinates}
       options={{
-        fillColor: "#2563eb",
+        fillColor: color,
         fillOpacity: 0.35,
-        strokeColor: "#1d4ed8",
+        strokeColor: color,
         strokeWeight: 3,
       }}
     />
