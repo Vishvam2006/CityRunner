@@ -46,3 +46,17 @@ CREATE TABLE IF NOT EXISTS fraud_logs (
   score_added INT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS user_stats (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  total_distance_km DOUBLE PRECISION DEFAULT 0,
+  total_runs INT DEFAULT 0,
+  total_loops INT DEFAULT 0,
+  last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_stats_ranking ON user_stats (
+  total_distance_km DESC, 
+  total_loops DESC, 
+  total_runs DESC
+);

@@ -7,6 +7,7 @@ import { Home } from "./features/home/Home";
 import { ActiveRun } from "./features/run/ActiveRun";
 import { Territory } from "./features/territory/Territory";
 import { Profile } from "./features/profile/Profile";
+import { Leaderboard } from "./features/leaderboard/Leaderboard";
 import { useUser } from "./hooks/queries/useAuth";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -81,6 +82,16 @@ function App() {
             <ProtectedRoute>
               <MobileLayout>
                 <Territory />
+              </MobileLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/leaderboard"
+          element={
+            <ProtectedRoute>
+              <MobileLayout>
+                <Leaderboard />
               </MobileLayout>
             </ProtectedRoute>
           }

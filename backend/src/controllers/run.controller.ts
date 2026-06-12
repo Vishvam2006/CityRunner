@@ -11,6 +11,8 @@ import {
   addFraudLog,
   updateRunAntiCheat,
 } from "../repositories/run.repository";
+import { detectLoopForRun } from "../repositories/territory.repository";
+import { updateUserStats } from "../repositories/user.repository";
 
 import { calculateDistance } from "../utils/calculateDistance";
 import {
@@ -273,12 +275,24 @@ export const finishRun = async (req: AuthRequest, res: Response) => {
 
     const finishedRun = await finishRunInDb(runId, distanceKm, status);
 
+    let loopsDetected = 0;
+    if (status === "VALID") {
+      const loopResult = await detectLoopForRun(runId, userId, points);
+      if (loopResult.loop_detected) {
+        loopsDetected = 1;
+      }
+      
+      // Update the user's aggregated stats
+      await updateUserStats(userId, distanceKm, loopsDetected);
+    }
+
     return res.status(200).json({
       run: finishedRun,
       totalPoints: points.length,
       distanceKm,
       status: finishedRun.status,
       fraudScore: run.fraud_score,
+      loopsDetected,
     });
   } catch (error) {
     console.error(error);

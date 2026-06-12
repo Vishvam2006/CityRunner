@@ -57,3 +57,22 @@ export interface TerritoryLoopResponse {
   point_count: number;
   reason?: string;
 }
+
+export interface LeaderboardUser {
+  userId: string;
+  username: string;
+  distance: number;
+  loops: number;
+  runs: number;
+  rank: number;
+}
+
+export interface LeaderboardResponse {
+  data: LeaderboardUser[];
+  meta: {
+    page: number;
+    limit: number;
+    totalPages: number;
+    totalRecords: number;
+  };
+}

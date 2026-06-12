@@ -45,3 +45,22 @@ export async function createUser(
 
   return result.rows[0];
 }
+
+export async function updateUserStats(
+  userId: string,
+  distanceKm: number,
+  loopsDetected: number
+) {
+  await pool.query(
+    `
+    INSERT INTO user_stats (user_id, total_distance_km, total_runs, total_loops)
+    VALUES ($1, $2, 1, $3)
+    ON CONFLICT (user_id) DO UPDATE SET
+      total_distance_km = user_stats.total_distance_km + EXCLUDED.total_distance_km,
+      total_runs = user_stats.total_runs + EXCLUDED.total_runs,
+      total_loops = user_stats.total_loops + EXCLUDED.total_loops,
+      last_updated = CURRENT_TIMESTAMP
+    `,
+    [userId, distanceKm, loopsDetected]
+  );
+}
