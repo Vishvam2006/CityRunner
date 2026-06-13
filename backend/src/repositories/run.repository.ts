@@ -25,12 +25,36 @@ export async function addGpsPoint(
   const result = await pool.query(
     `
     INSERT INTO gps_points
-      (run_id, latitude, longitude, accuracy, speed, sequence_number, client_timestamp)
+    (
+      run_id,
+      latitude,
+      longitude,
+      accuracy,
+      speed,
+      sequence_number,
+      client_timestamp
+    )
     VALUES
-      ($1, $2, $3, $4, $5, $6, $7)
+    (
+      $1,
+      $2,
+      $3,
+      $4,
+      $5,
+      $6,
+      $7
+    )
     RETURNING *
     `,
-    [runId, latitude, longitude, accuracy, speed, sequence_number, client_timestamp]
+    [
+      runId,
+      latitude,
+      longitude,
+      accuracy,
+      speed,
+      sequence_number,
+      client_timestamp,
+    ]
   );
   return result.rows[0];
 }
@@ -86,13 +110,57 @@ export async function finishRunInDb(
     `
     UPDATE runs
     SET
-      ended_at    = NOW(),
+      ended_at = NOW(),
       distance_km = $2,
-      status      = $3
+      status = $3
     WHERE id = $1
     RETURNING *
     `,
     [runId, distanceKm, status]
+  );
+
+  return result.rows[0];
+}
+
+export async function addFraudLog(
+  runId: string,
+  reason: string,
+  scoreAdded: number
+) {
+  await pool.query(
+    `
+    INSERT INTO fraud_logs (run_id, reason, score_added)
+    VALUES ($1, $2, $3)
+    `,
+    [runId, reason, scoreAdded]
+  );
+}
+
+export async function updateRunAntiCheat(
+  runId: string,
+  scoreToAdd: number,
+  newSequenceNumber: number
+) {
+  await pool.query(
+    `
+    UPDATE runs
+    SET
+      fraud_score = fraud_score + $2,
+      last_sequence_number = $3
+    WHERE id = $1
+    `,
+    [runId, scoreToAdd, newSequenceNumber]
+  );
+}
+
+export async function getRunFraudScore(runId: string) {
+  const result = await pool.query(
+    `
+    SELECT fraud_score, status
+    FROM runs
+    WHERE id = $1
+    `,
+    [runId]
   );
   return result.rows[0];
 }

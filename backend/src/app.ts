@@ -21,6 +21,10 @@ app.use("/api/auth", authRouter);
 app.use("/api/runs", runRouter);
 app.use("/api/territory", territoryRouter);
 app.use("/api/leaderboard", leaderboardRouter);
+
+
+
+
 const startServer = async () => {
   await connectDB();
 
