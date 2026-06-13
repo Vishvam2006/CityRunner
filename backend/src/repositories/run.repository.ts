@@ -136,49 +136,6 @@ export async function addFraudLog(
   );
 }
 
-export async function updateRunAntiCheat(
-  runId: string,
-  scoreToAdd: number,
-  newSequenceNumber: number
-) {
-  await pool.query(
-    `
-    UPDATE runs
-    SET
-      fraud_score = fraud_score + $2,
-      last_sequence_number = $3
-    WHERE id = $1
-    `,
-    [runId, scoreToAdd, newSequenceNumber]
-  );
-}
-
-export async function getRunFraudScore(runId: string) {
-  const result = await pool.query(
-    `
-    SELECT fraud_score, status
-    FROM runs
-    WHERE id = $1
-    `,
-    [runId]
-  );
-  return result.rows[0];
-}
-
-export async function addFraudLog(
-  runId: string,
-  reason: string,
-  scoreAdded: number
-) {
-  await pool.query(
-    `
-    INSERT INTO fraud_logs (run_id, reason, score_added)
-    VALUES ($1, $2, $3)
-    `,
-    [runId, reason, scoreAdded]
-  );
-}
-
 /** Optional last-point payload written alongside the fraud/sequence update.
  *  Storing these four values in the runs row eliminates the O(n) `getRunPoints`
  *  call previously needed to perform the anti-cheat movement check. */

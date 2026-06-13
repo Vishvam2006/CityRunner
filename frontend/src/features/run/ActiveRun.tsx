@@ -7,7 +7,7 @@ import {
 } from "../../hooks/queries/useRuns";
 import { useRunStore } from "../../store/run.store";
 import { useGeolocation } from "../../hooks/useGeolocation";
-import { RealtimeLoop } from "../../types";
+import { FinishRunResponse, RealtimeLoop } from "../../types";
 import CityMap from "../map/components/CityMap";
 import UserMarker from "../map/components/UserMarker";
 import RoutePolyline from "../map/components/RoutePolyline";
@@ -43,7 +43,7 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
   return (
     <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium ${colour}`}>
       <Gauge className="w-3.5 h-3.5" />
-      <span>{label} — {confidence}%</span>
+      <span>{label} - {confidence}%</span>
     </div>
   );
 }
@@ -52,7 +52,7 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
 
 export function ActiveRun() {
   const navigate  = useNavigate();
-  const { mutate: startRun, isPending: starting }     = useStartRun();
+  const { mutate: startRun, isPending: starting } = useStartRun();
   const { mutateAsync: finishRun, isPending: finishing } = useFinishRun();
   const {
     currentRunId,
@@ -64,8 +64,7 @@ export function ActiveRun() {
     resetRun,
   } = useRunStore();
   const [showSummary, setShowSummary] = useState(false);
-  const [finishedRunId, setFinishedRunId] = useState<string | null>(null);
-  const [runResult, setRunResult] = useState<any>(null);
+  const [runResult, setRunResult] = useState<FinishRunResponse | null>(null);
 
   const { gpsStatus, gpsError } = useGeolocation();
 
@@ -97,10 +96,11 @@ export function ActiveRun() {
     try {
       const res = await finishRun(idToFinish);
       setRunResult(res);
-    } catch (err: any) {
-      const msg = err?.response?.data?.message ?? "";
+    } catch (err: unknown) {
+      const responseError = err as { response?: { status?: number; data?: { message?: string } } };
+      const msg = responseError.response?.data?.message ?? "";
       if (
-        err?.response?.status !== 400 ||
+        responseError.response?.status !== 400 ||
         msg !== "Run contains no GPS points"
       ) {
         alert("Failed to finish run cleanly.");
@@ -125,7 +125,7 @@ export function ActiveRun() {
 
   // ── Summary Screen ────────────────────────────────────────────────────────
   if (showSummary) {
-    const finalLoops: RealtimeLoop[] = runResult?.loops ?? [];
+    const finalLoops: RealtimeLoop[] = displayLoops;
 
     return (
       <div className="flex-1 flex flex-col p-4 pt-12 space-y-6 overflow-y-auto">
@@ -146,69 +146,17 @@ export function ActiveRun() {
                 <AlertTriangle className="w-10 h-10 text-red-400" />
               </div>
               <p className="text-2xl font-bold text-red-400">Run Rejected</p>
-              <p className="text-sm text-slate-400">Suspicious activity detected. Fraud score: {runResult?.fraudScore}</p>
-            </div>
-          ) : (
-            <>
-              {runResult?.status === "FLAGGED" && (
-                <div className="bg-amber-900/50 border border-amber-700/50 p-3 rounded-lg flex items-start space-x-3 mb-2">
-                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-200">This run has been flagged for review due to unusual activity (Score: {runResult?.fraudScore}). Rewards may be withheld.</p>
-                </div>
-              )}
-              <h2 className="text-xl font-semibold text-slate-300">Territory Status</h2>
-
-              {checkingLoop ? (
-            <div className="flex flex-col items-center space-y-2 text-blue-400">
-              <Loader2 className="w-8 h-8 animate-spin" />
-              <p>Analyzing route for loops...</p>
-            </div>
-          ) : loopData?.loop_detected ? (
-            <div className="text-center space-y-2">
-              <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/50">
-                <MapPin className="w-10 h-10 text-emerald-400" />
-              </div>
-              <p className="text-2xl font-bold text-emerald-400">
-                Territory Captured!
-              </p>
-              <p className="text-slate-400">
-                Area: {Math.round(loopData.area_m2 || 0)} m²
-              </p>
-              <p className="text-slate-500 text-sm">
-                Gap: {Math.round(loopData.gap_m || 0)}m
-              </p>
-              {/* Auto-save status indicator */}
-              {savingTerritory && (
-                <div className="flex items-center justify-center space-x-2 text-blue-400 text-sm pt-1">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Saving to map...</span>
-                </div>
-              )}
-              {territorySaved && (
-                <p className="text-emerald-500 text-sm font-medium pt-1">
-                  ✓ Territory saved to map
-                </p>
-              )}
-            </div>
-          ) : routePoints.length === 0 ? (
-            <div className="text-center space-y-2">
-              <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/50">
-                <AlertTriangle className="w-10 h-10 text-red-400" />
-              </div>
-              <p className="text-2xl font-bold text-red-400">Run Rejected</p>
               <p className="text-sm text-slate-400">
                 Suspicious activity detected. Fraud score: {runResult?.fraudScore}
               </p>
             </div>
           ) : (
             <>
-              {/* ── Flagged warning banner ─────────────────────────────── */}
               {runResult?.status === "FLAGGED" && (
                 <div className="bg-amber-900/50 border border-amber-700/50 p-3 rounded-lg flex items-start space-x-3 mb-2">
                   <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                   <p className="text-xs text-amber-200">
-                    This run has been flagged for review (Score: {runResult?.fraudScore}).
-                    Rewards may be withheld.
+                    This run has been flagged for review (Score: {runResult?.fraudScore}). Rewards may be withheld.
                   </p>
                 </div>
               )}
@@ -218,16 +166,15 @@ export function ActiveRun() {
               {finishing ? (
                 <div className="flex flex-col items-center space-y-2 text-blue-400">
                   <Loader2 className="w-8 h-8 animate-spin" />
-                  <p>Processing run data…</p>
+                  <p>Processing run data...</p>
                 </div>
               ) : finalLoops.length > 0 ? (
-                /* ── ✅ Loops detected ──────────────────────────────────── */
                 <div className="text-center space-y-6 w-full">
                   <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-2 border border-emerald-500/50">
                     <MapPin className="w-10 h-10 text-emerald-400" />
                   </div>
                   <p className="text-2xl font-bold text-emerald-400">
-                    {finalLoops.length} {finalLoops.length === 1 ? 'Territory' : 'Territories'} Captured!
+                    {finalLoops.length} {finalLoops.length === 1 ? "Territory" : "Territories"} Captured!
                   </p>
 
                   <div className="space-y-4 w-full">
@@ -235,16 +182,14 @@ export function ActiveRun() {
                       <div key={loop.loopId} className="bg-slate-800/50 p-4 rounded-xl text-left border border-slate-700 w-full flex flex-col gap-2">
                         <div className="flex justify-between items-center">
                           <span className="font-semibold text-slate-200">Territory #{idx + 1}</span>
-                          <span className="text-sm text-slate-400">{Math.round(loop.area_m2)} m²</span>
+                          <span className="text-sm text-slate-400">{Math.round(loop.area_m2)} m2</span>
                         </div>
                         <ConfidenceBadge confidence={loop.confidence} />
                       </div>
                     ))}
                   </div>
                 </div>
-
               ) : routePoints.length === 0 ? (
-                /* ── No GPS data at all ───────────────────────────────── */
                 <div className="text-center space-y-2">
                   <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
                     <WifiOff className="w-10 h-10 text-amber-400" />
@@ -252,9 +197,7 @@ export function ActiveRun() {
                   <p className="text-xl font-semibold text-slate-300">No GPS Data Recorded</p>
                   <p className="text-sm text-slate-500">Enable location permissions and try again.</p>
                 </div>
-
               ) : (
-                /* ── Loop not detected ────────────────────────────────── */
                 <div className="text-center space-y-3">
                   <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-2">
                     <MapPin className="w-10 h-10 text-slate-500" />
@@ -267,8 +210,6 @@ export function ActiveRun() {
                 </div>
               )}
             </>
-          )}
-          </>
           )}
         </Card>
 
@@ -347,7 +288,7 @@ export function ActiveRun() {
               {gpsStatus === "active"
                 ? "REC"
                 : gpsStatus === "locating"
-                ? "GPS…"
+                ? "GPS..."
                 : "NO GPS"}
             </span>
           </div>
@@ -357,7 +298,7 @@ export function ActiveRun() {
             </div>
             {displayLoops.length > 0 && (
               <div className="glass px-4 py-2 rounded-full shadow-lg text-right border border-emerald-500/50">
-                <span className="font-mono text-emerald-400">{displayLoops.length} LOOP{displayLoops.length > 1 ? 'S' : ''}</span>
+                <span className="font-mono text-emerald-400">{displayLoops.length} LOOP{displayLoops.length > 1 ? "S" : ""}</span>
               </div>
             )}
           </div>
@@ -369,7 +310,7 @@ export function ActiveRun() {
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 glass-card px-6 py-3 rounded-full flex items-center space-x-3 shadow-2xl pointer-events-none">
             <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
             <span className="font-medium text-sm text-slate-200">
-              {starting ? "Starting run…" : "Acquiring GPS…"}
+              {starting ? "Starting run..." : "Acquiring GPS..."}
             </span>
           </div>
         )}

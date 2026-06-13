@@ -84,8 +84,6 @@ export const createTerritory = async (req: AuthRequest, res: Response) => {
     }
 
     const territory = await createTerritoryRepo(userId, polygonWkt, area);
-
-    const territory = await createTerritoryRepo(userId, polygonWkt, area);
     return res.status(201).json(territory);
   } catch (error) {
     console.error("[createTerritory] Failed:", error);

@@ -11,8 +11,12 @@ import {
   addFraudLog,
   updateRunAntiCheat,
 } from "../repositories/run.repository";
-import { detectLoopForRun } from "../repositories/territory.repository";
+import { getRunLoops } from "../repositories/loop.repository";
 import { updateUserStats } from "../repositories/user.repository";
+import {
+  processNewSegment,
+  RealtimeLoopResult,
+} from "../services/realtimeLoop.service";
 
 import { calculateDistance } from "../utils/calculateDistance";
 import {
@@ -20,9 +24,7 @@ import {
   validateBurstUpload,
   validateMovement,
 } from "../utils/antiCheat";
-
-async function validateRunOwnership(runId: string, userId: string) {
-  const run = await findRunByIdAndUserId(runId, userId);
+import { wktPolygonToCoords } from "../utils/geometryUtils";
 
 // ── startRun ──────────────────────────────────────────────────────────────────
 
@@ -84,27 +86,23 @@ export const savePoint = async (req: AuthRequest, res: Response) => {
     const run = await findRunByIdAndUserId(runId, userId);
     if (!run) return res.status(404).json({ message: "Run not found" });
 
-    const {
-      latitude,
-      longitude,
-      accuracy,
-      speed,
-      sequence_number,
-      client_timestamp,
-    } = req.body;
-
-    if (
-      latitude === undefined ||
-      longitude === undefined ||
-      sequence_number === undefined ||
-      client_timestamp === undefined
-    ) {
-      return res.status(400).json({
-        message: "Missing required fields",
-      });
+    const newDate = new Date(client_timestamp);
+    if (Number.isNaN(newDate.getTime())) {
+      return res.status(400).json({ message: "Invalid client_timestamp" });
     }
 
+    const prevLat = run.last_lat as number | null;
+    const prevLng = run.last_lng as number | null;
+    const prevSeq = run.last_sequence_number as number;
     let accumulatedFraudScore = 0;
+
+    // 1. Validate Sequence
+    const seqCheck = validateSequence(sequence_number, prevSeq);
+    if (!seqCheck.isValid) {
+      await addFraudLog(runId, seqCheck.reason!, seqCheck.fraudScoreAdded);
+      await updateRunAntiCheat(runId, seqCheck.fraudScoreAdded, sequence_number);
+      return res.status(400).json({ message: seqCheck.reason });
+    }
 
     // ── Burst / movement checks (O(1) via last-point snapshot) ───────────
     if (run.last_lat != null && run.last_lng != null && run.last_client_ts != null) {
@@ -140,61 +138,14 @@ export const savePoint = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    const newDate = new Date(client_timestamp);
-
-    // 1. Validate Sequence
-    const seqCheck = validateSequence(sequence_number, run.last_sequence_number);
-    if (!seqCheck.isValid) {
-      await addFraudLog(runId, seqCheck.reason!, seqCheck.fraudScoreAdded);
-      await updateRunAntiCheat(runId, seqCheck.fraudScoreAdded, sequence_number);
-      return res.status(400).json({ message: seqCheck.reason });
-    }
-
-    let accumulatedFraudScore = 0;
-
-    // Get previous points to validate movement and burst
-    const points = await getRunPoints(runId);
-    if (points.length > 0) {
-      const lastPoint = points[points.length - 1];
-      
-      const serverReceiveDeltaMs = Date.now() - new Date(lastPoint.server_received_at).getTime();
-      const clientTimeDeltaMs = newDate.getTime() - new Date(lastPoint.client_timestamp).getTime();
-
-      // 2. Validate Burst Upload
-      const burstCheck = validateBurstUpload(serverReceiveDeltaMs, clientTimeDeltaMs);
-      if (!burstCheck.isValid) {
-        accumulatedFraudScore += burstCheck.fraudScoreAdded;
-        await addFraudLog(runId, burstCheck.reason!, burstCheck.fraudScoreAdded);
-      }
-
-      // 3. Validate Movement
-      const movementCheck = validateMovement(
-        {
-          latitude: lastPoint.latitude,
-          longitude: lastPoint.longitude,
-          client_timestamp: new Date(lastPoint.client_timestamp),
-        },
-        {
-          latitude,
-          longitude,
-          client_timestamp: newDate,
-        }
-      );
-
-      if (movementCheck.fraudScoreAdded > 0) {
-        accumulatedFraudScore += movementCheck.fraudScoreAdded;
-        await addFraudLog(runId, movementCheck.reason!, movementCheck.fraudScoreAdded);
-      }
-      
-      if (!movementCheck.isValid) {
-        // Point is completely invalid (teleportation)
-        await updateRunAntiCheat(runId, accumulatedFraudScore, sequence_number);
-        return res.status(400).json({ message: movementCheck.reason });
-      }
-    }
-
     // Point is valid (even if highly suspicious, we store it and add score)
-    await updateRunAntiCheat(runId, accumulatedFraudScore, sequence_number);
+    await updateRunAntiCheat(runId, accumulatedFraudScore, sequence_number, {
+      latitude,
+      longitude,
+      client_timestamp,
+      server_received_at: new Date(),
+      accuracy: accuracy ?? null,
+    });
 
     const point = await addGpsPoint(
       runId,
@@ -206,21 +157,12 @@ export const savePoint = async (req: AuthRequest, res: Response) => {
       client_timestamp
     );
 
-    const point = await addGpsPoint(
-      runId, latitude, longitude,
-      accuracy, speed, sequence_number, client_timestamp
-    );
-
     // ── Real-time loop detection ──────────────────────────────────────────
     // Only run for clean points in a VALID (non-rejected) run that already
     // has at least one prior saved point.
     let loopDetected: RealtimeLoopResult | null = null;
 
-    if (
-      run.fraud_score < 60 &&   // run not rejected
-      prevLat != null &&
-      prevLng != null
-    ) {
+    if (run.fraud_score < 60 && prevLat != null && prevLng != null) {
       try {
         loopDetected = await processNewSegment(
           runId, userId,
@@ -351,10 +293,7 @@ export const finishRun = async (req: AuthRequest, res: Response) => {
 
     let loopsDetected = 0;
     if (status === "VALID") {
-      const loopResult = await detectLoopForRun(runId, userId, points);
-      if (loopResult.loop_detected) {
-        loopsDetected = 1;
-      }
+      loopsDetected = (await getRunLoops(runId)).length;
       
       // Update the user's aggregated stats
       await updateUserStats(userId, distanceKm, loopsDetected);

@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useUser } from "../../hooks/queries/useAuth";
 import { Card, CardContent } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
-import { Play, Map as MapIcon, Flag, Activity } from "lucide-react";
+import { Play, Flag, Activity } from "lucide-react";
 
 export function Home() {
   const { data } = useUser();

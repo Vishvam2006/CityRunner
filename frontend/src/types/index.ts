@@ -71,6 +71,12 @@ export interface SavePointResponse {
   loopDetected: RealtimeLoop | null;
 }
 
+/** Response from GET /runs/:runId/loops */
+export interface RunLoopsResponse {
+  runId: string;
+  loops: RealtimeLoop[];
+}
+
 /** Response from POST /runs/:runId/finish */
 export interface FinishRunResponse {
   run: Run;
@@ -78,16 +84,20 @@ export interface FinishRunResponse {
   distanceKm: number;
   status: string;
   fraudScore?: number;
+  loopsDetected?: number;
 }
 
-export interface LeaderboardResponse {
-  data: LeaderboardUser[];
-  meta: {
-    page: number;
-    limit: number;
-    totalPages: number;
-    totalRecords: number;
-  };
+export interface TerritoryLoopResponse {
+  success: boolean;
+  loop_detected: boolean;
+  confidence?: number;
+  gap_m: number | null;
+  area_m2: number | null;
+  polygon_wkt?: string | null;
+  polygonWkt?: string | null;
+  point_count?: number;
+  reason?: string;
+  message?: string;
 }
 
 export interface LeaderboardUser {
