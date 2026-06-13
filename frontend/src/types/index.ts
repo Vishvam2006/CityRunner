@@ -38,9 +38,40 @@ export interface GpsPoint {
   longitude: number;
   accuracy?: number | null;
   speed?: number | null;
+  sequence_number?: number;
   recorded_at?: string;
+  client_timestamp?: string;
 }
 
+// ── Real-time loop detection ───────────────────────────────────────────────────
+
+/**
+ * A loop detected in real-time during savePoint.
+ * Returned by POST /runs/:runId/points inside `loopDetected`.
+ * Also used in GET /runs/:runId/loops (recovery) and in FinishRunResponse.
+ */
+export interface RealtimeLoop {
+  loopId: string;
+  territoryId: string;
+  /** True polygon WKT built from actual GPS path (not convex hull). */
+  polygonWkt: string;
+  /** Pre-parsed {lat,lng} array for direct use with React Google Maps. */
+  polygonCoords: Array<{ lat: number; lng: number }>;
+  area_m2: number;
+  perimeter_m: number;
+  /** 0–100 confidence score. */
+  confidence: number;
+  /** ISO timestamp when the loop was detected. */
+  detected_at?: string;
+}
+
+/** Response from POST /runs/:runId/points */
+export interface SavePointResponse {
+  point: GpsPoint;
+  loopDetected: RealtimeLoop | null;
+}
+
+/** Response from POST /runs/:runId/finish */
 export interface FinishRunResponse {
   run: Run;
   totalPoints: number;
@@ -49,15 +80,14 @@ export interface FinishRunResponse {
   fraudScore?: number;
 }
 
-export interface TerritoryLoopResponse {
-  success: boolean;
-  loop_detected: boolean;
-  gap_m: number | null;
-  area_m2: number | null;
-  point_count: number;
-  reason?: string;
-  /** WKT polygon string. Present only when loop_detected === true. */
-  polygonWkt?: string | null;
+export interface LeaderboardResponse {
+  data: LeaderboardUser[];
+  meta: {
+    page: number;
+    limit: number;
+    totalPages: number;
+    totalRecords: number;
+  };
 }
 
 export interface LeaderboardUser {

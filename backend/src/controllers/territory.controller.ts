@@ -18,23 +18,15 @@ const MIN_POINTS = 10;
 export const checkLoop = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
-
     if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized",
-      });
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
     const { runId } = req.params as { runId: string };
 
     const run = await findRunByIdAndUserId(runId, userId);
-
     if (!run) {
-      return res.status(404).json({
-        success: false,
-        message: "Run not found",
-      });
+      return res.status(404).json({ success: false, message: "Run not found" });
     }
 
     const points = await getRunPoints(runId);
@@ -73,24 +65,15 @@ export const checkLoop = async (req: AuthRequest, res: Response) => {
       polygonWkt,
     });
   } catch (error) {
-    console.error(error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Internal Server Error",
-    });
+    console.error("[checkLoop]", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
 
 export const createTerritory = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const { polygonWkt, area } = req.body;
 
@@ -102,26 +85,20 @@ export const createTerritory = async (req: AuthRequest, res: Response) => {
 
     const territory = await createTerritoryRepo(userId, polygonWkt, area);
 
+    const territory = await createTerritoryRepo(userId, polygonWkt, area);
     return res.status(201).json(territory);
   } catch (error) {
     console.error("[createTerritory] Failed:", error);
-
-    return res.status(500).json({
-      message: "Failed to create territory",
-    });
+    return res.status(500).json({ message: "Failed to create territory" });
   }
 };
 
 export const getTerritories = async (req: AuthRequest, res: Response) => {
   try {
     const territories = await getTerritoriesRepo();
-
     return res.status(200).json(territories);
   } catch (error) {
-    console.error(error);
-
-    return res.status(500).json({
-      message: "Failed to fetch territories",
-    });
+    console.error("[getTerritories]", error);
+    return res.status(500).json({ message: "Failed to fetch territories" });
   }
 };

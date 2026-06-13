@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { runsApi } from "../../api/runs.api";
-import { territoryApi } from "../../api/territory.api";
 
 export const useStartRun = () => {
   return useMutation({
@@ -21,26 +20,32 @@ export const useFinishRun = () => {
   });
 };
 
-export const useCheckLoop = (runId: string | null) => {
+/**
+ * Fetches all loops detected during a run.
+ * Used for recovery when the user reloads the page mid-run:
+ *   const { data } = useGetRunLoops(currentRunId);
+ *   // data.loops restores the territory polygons on the map
+ */
+export const useGetRunLoops = (runId: string | null) => {
   return useQuery({
-    queryKey: ["loop", runId],
-    queryFn: () => territoryApi.checkLoop(runId!),
-    enabled: !!runId,
-    retry: false,
+    queryKey: ["runLoops", runId],
+    queryFn:  () => runsApi.getRunLoops(runId!),
+    enabled:  !!runId,
+    staleTime: Infinity, // loops don't change once detected
+    retry:    false,
   });
 };
 
+/**
+ * Invalidates the territory map cache when called.
+ * The territory list on the city map will refetch automatically.
+ */
 export const useCreateTerritory = () => {
   const queryClient = useQueryClient();
 
-  return useMutation({
-    mutationFn: ({ polygonWkt, area }: { polygonWkt: string; area: number }) =>
-      territoryApi.createTerritory(polygonWkt, area),
-    onSuccess: () => {
-      // Invalidate the territory list so any territory map component refetches
-      // and shows the newly captured polygon immediately.
+  return {
+    invalidateTerritories: () => {
       queryClient.invalidateQueries({ queryKey: ["territories"] });
     },
-  });
+  };
 };
-
