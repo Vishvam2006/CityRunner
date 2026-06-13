@@ -67,9 +67,6 @@ export function ActiveRun() {
   const [finishedRunId, setFinishedRunId] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<any>(null);
 
-  const [showSummary,    setShowSummary]    = useState(false);
-  const [runResult,      setRunResult]      = useState<any>(null);
-
   const { gpsStatus, gpsError } = useGeolocation();
 
   // Recovery hook: if the user reloads the page mid-run, fetch any loops
