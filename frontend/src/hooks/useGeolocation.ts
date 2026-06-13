@@ -25,7 +25,10 @@ export function useGeolocation() {
 
       if (!navigator.geolocation) {
         setGpsStatus("error");
-        setGpsError({ code: 0, message: "Geolocation is not supported by your browser." });
+        setGpsError({
+          code: 0,
+          message: "Geolocation is not supported by your browser.",
+        });
         return;
       }
 
@@ -40,6 +43,7 @@ export function useGeolocation() {
             accuracy: position.coords.accuracy,
             speed: position.coords.speed,
           };
+
 
           // Add locally immediately for smooth UI
           addRoutePoint(point);
@@ -69,7 +73,7 @@ export function useGeolocation() {
           enableHighAccuracy: true,
           maximumAge: 0,
           timeout: 15000,
-        }
+        },
       );
     } else {
       setGpsStatus("idle");

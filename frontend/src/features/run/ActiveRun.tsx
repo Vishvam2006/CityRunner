@@ -1,6 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useStartRun, useFinishRun, useCheckLoop } from "../../hooks/queries/useRuns";
+import {
+  useStartRun,
+  useFinishRun,
+  useCheckLoop,
+  useCreateTerritory,
+} from "../../hooks/queries/useRuns";
 import { useRunStore } from "../../store/run.store";
 import { useGeolocation } from "../../hooks/useGeolocation";
 import CityMap from "../map/components/CityMap";
@@ -9,13 +14,27 @@ import RoutePolyline from "../map/components/RoutePolyline";
 import TerritoryPolygon from "../map/components/TerritoryPolygon";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
-import { StopCircle, MapPin, Loader2, ArrowLeft, WifiOff, AlertTriangle } from "lucide-react";
+import {
+  StopCircle,
+  MapPin,
+  Loader2,
+  ArrowLeft,
+  WifiOff,
+  AlertTriangle,
+} from "lucide-react";
 
 export function ActiveRun() {
   const navigate = useNavigate();
   const { mutate: startRun, isPending: starting } = useStartRun();
   const { mutateAsync: finishRun, isPending: finishing } = useFinishRun();
-  const { currentRunId, isTracking, routePoints, startTracking, stopTracking, resetRun } = useRunStore();
+  const {
+    currentRunId,
+    isTracking,
+    routePoints,
+    startTracking,
+    stopTracking,
+    resetRun,
+  } = useRunStore();
   const [showSummary, setShowSummary] = useState(false);
   const [finishedRunId, setFinishedRunId] = useState<string | null>(null);
 
@@ -23,7 +42,19 @@ export function ActiveRun() {
   const { gpsStatus, gpsError } = useGeolocation();
 
   // Loop checking only after run is finished
-  const { data: loopData, isLoading: checkingLoop } = useCheckLoop(showSummary ? finishedRunId : null);
+  const { data: loopData, isLoading: checkingLoop } = useCheckLoop(
+    showSummary ? finishedRunId : null,
+  );
+
+  // Territory auto-save
+  const {
+    mutate: createTerritory,
+    isPending: savingTerritory,
+    isSuccess: territorySaved,
+  } = useCreateTerritory();
+  // Guard: ensure createTerritory() fires at most once per finished run
+  // regardless of how many times React re-renders the summary screen.
+  const hasSavedTerritoryRef = useRef(false);
 
   // Auto-start run on mount if not already tracking
   useEffect(() => {
@@ -38,8 +69,34 @@ export function ActiveRun() {
         },
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
+
+  // ── Territory auto-save ─────────────────────────────────────────────
+  // Fires exactly once when loopData arrives with a detected loop.
+  // hasSavedTerritoryRef ensures we never POST more than once even if
+  // React re-renders or StrictMode double-invokes the effect.
+  useEffect(() => {
+    if (
+      loopData?.loop_detected &&
+      loopData.polygonWkt &&
+      loopData.area_m2 !== null &&
+      !hasSavedTerritoryRef.current
+    ) {
+      hasSavedTerritoryRef.current = true;
+      createTerritory({
+        polygonWkt: loopData.polygonWkt,
+        area: loopData.area_m2,
+      });
+    }
+  }, [loopData, createTerritory]);
+
+  // Reset the dedup guard whenever a new run summary opens
+  useEffect(() => {
+    if (showSummary) {
+      hasSavedTerritoryRef.current = false;
+    }
+  }, [showSummary]);
 
   const handleStopRun = async () => {
     if (!currentRunId) return;
@@ -52,7 +109,10 @@ export function ActiveRun() {
     } catch (err: any) {
       const msg = err?.response?.data?.message || "";
       // 400 "Run contains no GPS points" — still show summary, just no distance
-      if (err?.response?.status !== 400 || msg !== "Run contains no GPS points") {
+      if (
+        err?.response?.status !== 400 ||
+        msg !== "Run contains no GPS points"
+      ) {
         alert("Failed to finish run cleanly.");
         resetRun();
         navigate("/");
@@ -80,14 +140,19 @@ export function ActiveRun() {
     return (
       <div className="flex-1 flex flex-col p-4 pt-12 space-y-6 overflow-y-auto">
         <header className="flex items-center">
-          <button onClick={handleClose} className="p-2 -ml-2 rounded-full hover:bg-slate-800">
+          <button
+            onClick={handleClose}
+            className="p-2 -ml-2 rounded-full hover:bg-slate-800"
+          >
             <ArrowLeft className="w-6 h-6" />
           </button>
           <h1 className="text-3xl font-bold ml-2">Run Completed</h1>
         </header>
 
         <Card className="bg-slate-900 border-slate-800 p-6 flex flex-col items-center justify-center space-y-4">
-          <h2 className="text-xl font-semibold text-slate-300">Territory Status</h2>
+          <h2 className="text-xl font-semibold text-slate-300">
+            Territory Status
+          </h2>
 
           {checkingLoop ? (
             <div className="flex flex-col items-center space-y-2 text-blue-400">
@@ -99,25 +164,51 @@ export function ActiveRun() {
               <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/50">
                 <MapPin className="w-10 h-10 text-emerald-400" />
               </div>
-              <p className="text-2xl font-bold text-emerald-400">Territory Captured!</p>
-              <p className="text-slate-400">Area: {Math.round(loopData.area_m2 || 0)} m²</p>
-              <p className="text-slate-500 text-sm">Gap: {Math.round(loopData.gap_m || 0)}m</p>
+              <p className="text-2xl font-bold text-emerald-400">
+                Territory Captured!
+              </p>
+              <p className="text-slate-400">
+                Area: {Math.round(loopData.area_m2 || 0)} m²
+              </p>
+              <p className="text-slate-500 text-sm">
+                Gap: {Math.round(loopData.gap_m || 0)}m
+              </p>
+              {/* Auto-save status indicator */}
+              {savingTerritory && (
+                <div className="flex items-center justify-center space-x-2 text-blue-400 text-sm pt-1">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Saving to map...</span>
+                </div>
+              )}
+              {territorySaved && (
+                <p className="text-emerald-500 text-sm font-medium pt-1">
+                  ✓ Territory saved to map
+                </p>
+              )}
             </div>
           ) : routePoints.length === 0 ? (
             <div className="text-center space-y-2">
               <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
                 <WifiOff className="w-10 h-10 text-amber-400" />
               </div>
-              <p className="text-xl font-semibold text-slate-300">No GPS Data Recorded</p>
-              <p className="text-sm text-slate-500">Enable location permissions and try again.</p>
+              <p className="text-xl font-semibold text-slate-300">
+                No GPS Data Recorded
+              </p>
+              <p className="text-sm text-slate-500">
+                Enable location permissions and try again.
+              </p>
             </div>
           ) : (
             <div className="text-center space-y-2">
               <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
                 <MapPin className="w-10 h-10 text-slate-500" />
               </div>
-              <p className="text-xl font-semibold text-slate-300">No Territory Captured</p>
-              {loopData?.reason && <p className="text-sm text-slate-500">{loopData.reason}</p>}
+              <p className="text-xl font-semibold text-slate-300">
+                No Territory Captured
+              </p>
+              {loopData?.reason && (
+                <p className="text-sm text-slate-500">{loopData.reason}</p>
+              )}
               {loopData?.gap_m != null && (
                 <p className="text-sm text-slate-500">
                   Gap to start: {Math.round(loopData.gap_m)}m (needs &lt;30m)
@@ -131,9 +222,20 @@ export function ActiveRun() {
         {routePoints.length > 0 && (
           <div className="h-64 rounded-3xl overflow-hidden relative border border-slate-800">
             <CityMap center={mapCenter}>
-              <RoutePolyline points={routePoints.map((p) => ({ lat: p.latitude, lng: p.longitude }))} />
+              <RoutePolyline
+                points={routePoints.map((p) => ({
+                  lat: p.latitude,
+                  lng: p.longitude,
+                }))}
+              />
               {loopData?.loop_detected && (
-                <TerritoryPolygon points={routePoints.map((p) => ({ lat: p.latitude, lng: p.longitude }))} />
+                <TerritoryPolygon
+                  coordinates={routePoints.map((p) => ({
+                    lat: p.latitude,
+                    lng: p.longitude,
+                  }))}
+                  userId="current-user"
+                />
               )}
             </CityMap>
           </div>
@@ -153,10 +255,20 @@ export function ActiveRun() {
       <div className="absolute inset-0 z-0">
         <CityMap center={mapCenter}>
           {currentLocation && (
-            <UserMarker position={{ lat: currentLocation.latitude, lng: currentLocation.longitude }} />
+            <UserMarker
+              position={{
+                lat: currentLocation.latitude,
+                lng: currentLocation.longitude,
+              }}
+            />
           )}
           {routePoints.length > 0 && (
-            <RoutePolyline points={routePoints.map((p) => ({ lat: p.latitude, lng: p.longitude }))} />
+            <RoutePolyline
+              points={routePoints.map((p) => ({
+                lat: p.latitude,
+                lng: p.longitude,
+              }))}
+            />
           )}
         </CityMap>
       </div>
@@ -182,7 +294,11 @@ export function ActiveRun() {
               <WifiOff className="w-3 h-3 text-red-400" />
             )}
             <span className="font-semibold tracking-wider text-sm">
-              {gpsStatus === "active" ? "REC" : gpsStatus === "locating" ? "GPS..." : "NO GPS"}
+              {gpsStatus === "active"
+                ? "REC"
+                : gpsStatus === "locating"
+                  ? "GPS..."
+                  : "NO GPS"}
             </span>
           </div>
           <div className="glass px-4 py-2 rounded-full pointer-events-auto shadow-lg">
@@ -191,7 +307,10 @@ export function ActiveRun() {
         </div>
 
         {/* Loading overlay pill — shown only when starting or awaiting first GPS fix */}
-        {(starting || (isTracking && gpsStatus === "locating" && routePoints.length === 0)) && (
+        {(starting ||
+          (isTracking &&
+            gpsStatus === "locating" &&
+            routePoints.length === 0)) && (
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 glass-card px-6 py-3 rounded-full flex items-center space-x-3 shadow-2xl pointer-events-none">
             <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
             <span className="font-medium text-sm text-slate-200">
@@ -210,7 +329,10 @@ export function ActiveRun() {
             {finishing ? (
               <Loader2 className="w-8 h-8 animate-spin text-white" />
             ) : (
-              <StopCircle className="w-10 h-10 text-white" fill="currentColor" />
+              <StopCircle
+                className="w-10 h-10 text-white"
+                fill="currentColor"
+              />
             )}
           </button>
         </div>

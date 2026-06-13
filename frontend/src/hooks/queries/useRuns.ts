@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { runsApi } from "../../api/runs.api";
 import { territoryApi } from "../../api/territory.api";
 
@@ -29,3 +29,18 @@ export const useCheckLoop = (runId: string | null) => {
     retry: false,
   });
 };
+
+export const useCreateTerritory = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ polygonWkt, area }: { polygonWkt: string; area: number }) =>
+      territoryApi.createTerritory(polygonWkt, area),
+    onSuccess: () => {
+      // Invalidate the territory list so any territory map component refetches
+      // and shows the newly captured polygon immediately.
+      queryClient.invalidateQueries({ queryKey: ["territories"] });
+    },
+  });
+};
+

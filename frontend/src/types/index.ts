@@ -55,4 +55,6 @@ export interface TerritoryLoopResponse {
   area_m2: number | null;
   point_count: number;
   reason?: string;
+  /** WKT polygon string. Present only when loop_detected === true. */
+  polygonWkt?: string | null;
 }

@@ -66,9 +66,10 @@ export const checkLoop = async (req: AuthRequest, res: Response) => {
       )
       .join(", ");
 
-    const polygonWkt = `POLYGON((${wktPoints},
-  ${points[0].longitude}
-  ${points[0].latitude}))`;
+    // Close the ring by repeating the first coordinate on a single line.
+    // A multi-line template literal would embed newlines and corrupt the WKT.
+    const firstPoint = `${points[0].longitude} ${points[0].latitude}`;
+    const polygonWkt = `POLYGON((${wktPoints}, ${firstPoint}))`;
 
     const query = `
       WITH
@@ -121,7 +122,8 @@ export const checkLoop = async (req: AuthRequest, res: Response) => {
       gap_m: parseFloat(row.gap_m),
       area_m2: row.area_m2 !== null ? parseFloat(row.area_m2) : null,
       point_count: points.length,
-
+      // Only include the WKT when a real loop was detected so the
+      // frontend auto-save logic has an unambiguous gate.
       polygonWkt: row.loop_detected ? polygonWkt : null,
     });
   } catch (error) {
@@ -149,7 +151,13 @@ export const createTerritory = async (req: AuthRequest, res: Response) => {
     const territory = await createTerritoryRepo(userId, polygonWkt, area);
 
     return res.status(201).json(territory);
-  } catch (error) {}
+  } catch (error) {
+    console.error("[createTerritory] Failed:", error);
+
+    return res.status(500).json({
+      message: "Failed to create territory",
+    });
+  }
 };
 
 import { getTerritories as getTerritoriesRepo } from "../repositories/territory.repository";

@@ -1,22 +1,17 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import CityMap from "../map/components/CityMap";
 import TerritoryPolygon from "../map/components/TerritoryPolygon";
-
-import { getTerritories } from "../map/services/territory.service";
+import { territoryApi } from "../../api/territory.api";
 
 export function Territory() {
-  const [territories, setTerritories] = useState<any[]>([]);
-
-  useEffect(() => {
-    async function load() {
-      const data = await getTerritories();
-
-      setTerritories(data);
-    }
-
-    load();
-  }, []);
+  // Using React Query so that when useCreateTerritory invalidates the
+  // "territories" key after a successful save, this component automatically
+  // refetches and the new polygon appears on the map without any manual refresh.
+  const { data: territories = [] } = useQuery({
+    queryKey: ["territories"],
+    queryFn: territoryApi.getTerritories,
+  });
 
   return (
     <div className="h-screen">
