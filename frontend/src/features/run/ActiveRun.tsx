@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   useStartRun,
   useFinishRun,
-  useCheckLoop,
-  useCreateTerritory,
+  useGetRunLoops,
 } from "../../hooks/queries/useRuns";
 import { useRunStore } from "../../store/run.store";
 import { useGeolocation } from "../../hooks/useGeolocation";
+import { RealtimeLoop } from "../../types";
 import CityMap from "../map/components/CityMap";
 import UserMarker from "../map/components/UserMarker";
 import RoutePolyline from "../map/components/RoutePolyline";
@@ -21,84 +21,73 @@ import {
   ArrowLeft,
   WifiOff,
   AlertTriangle,
+  Gauge,
 } from "lucide-react";
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Colour-coded confidence label for detected loops. */
+function ConfidenceBadge({ confidence }: { confidence: number }) {
+  const label =
+    confidence >= 90 ? "High confidence" :
+    confidence >= 70 ? "Good confidence" :
+    confidence >= 50 ? "Moderate confidence" :
+    "Low confidence";
+
+  const colour =
+    confidence >= 90 ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" :
+    confidence >= 70 ? "text-blue-400    bg-blue-500/10    border-blue-500/30" :
+    confidence >= 50 ? "text-amber-400   bg-amber-500/10   border-amber-500/30" :
+                       "text-red-400     bg-red-500/10     border-red-500/30";
+
+  return (
+    <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium ${colour}`}>
+      <Gauge className="w-3.5 h-3.5" />
+      <span>{label} — {confidence}%</span>
+    </div>
+  );
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export function ActiveRun() {
-  const navigate = useNavigate();
-  const { mutate: startRun, isPending: starting } = useStartRun();
+  const navigate  = useNavigate();
+  const { mutate: startRun, isPending: starting }     = useStartRun();
   const { mutateAsync: finishRun, isPending: finishing } = useFinishRun();
   const {
     currentRunId,
     isTracking,
     routePoints,
+    detectedLoops,
     startTracking,
     stopTracking,
     resetRun,
   } = useRunStore();
-  const [showSummary, setShowSummary] = useState(false);
-  const [finishedRunId, setFinishedRunId] = useState<string | null>(null);
-  const [runResult, setRunResult] = useState<any>(null);
 
-  // Geolocation hook — now surfaces errors
+  const [showSummary,    setShowSummary]    = useState(false);
+  const [runResult,      setRunResult]      = useState<any>(null);
+
   const { gpsStatus, gpsError } = useGeolocation();
 
-  // Loop checking only after run is finished
-  const { data: loopData, isLoading: checkingLoop } = useCheckLoop(
-    showSummary ? finishedRunId : null,
-  );
+  // Recovery hook: if the user reloads the page mid-run, fetch any loops
+  // they already captured on the backend so they still show on the map.
+  const { data: recoveryLoopsData } = useGetRunLoops(currentRunId);
+  const displayLoops = detectedLoops.length > 0
+    ? detectedLoops
+    : (recoveryLoopsData?.loops ?? []);
 
-  // Territory auto-save
-  const {
-    mutate: createTerritory,
-    isPending: savingTerritory,
-    isSuccess: territorySaved,
-  } = useCreateTerritory();
-  // Guard: ensure createTerritory() fires at most once per finished run
-  // regardless of how many times React re-renders the summary screen.
-  const hasSavedTerritoryRef = useRef(false);
-
-  // Auto-start run on mount if not already tracking
+  // ── Auto-start run on mount ──────────────────────────────────────────────
   useEffect(() => {
     if (!isTracking && !showSummary) {
       startRun(undefined, {
-        onSuccess: (data) => {
-          startTracking(data.id);
-        },
-        onError: () => {
-          alert("Failed to start run. Is the backend running?");
-          navigate("/");
-        },
+        onSuccess: (data) => startTracking(data.id),
+        onError:   () => { alert("Failed to start run. Is the backend running?"); navigate("/"); },
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run once on mount
+  }, []);
 
-  // ── Territory auto-save ─────────────────────────────────────────────
-  // Fires exactly once when loopData arrives with a detected loop.
-  // hasSavedTerritoryRef ensures we never POST more than once even if
-  // React re-renders or StrictMode double-invokes the effect.
-  useEffect(() => {
-    if (
-      loopData?.loop_detected &&
-      loopData.polygonWkt &&
-      loopData.area_m2 !== null &&
-      !hasSavedTerritoryRef.current
-    ) {
-      hasSavedTerritoryRef.current = true;
-      createTerritory({
-        polygonWkt: loopData.polygonWkt,
-        area: loopData.area_m2,
-      });
-    }
-  }, [loopData, createTerritory]);
-
-  // Reset the dedup guard whenever a new run summary opens
-  useEffect(() => {
-    if (showSummary) {
-      hasSavedTerritoryRef.current = false;
-    }
-  }, [showSummary]);
-
+  // ── Stop handler ─────────────────────────────────────────────────────────
   const handleStopRun = async () => {
     if (!currentRunId) return;
 
@@ -109,8 +98,7 @@ export function ActiveRun() {
       const res = await finishRun(idToFinish);
       setRunResult(res);
     } catch (err: any) {
-      const msg = err?.response?.data?.message || "";
-      // 400 "Run contains no GPS points" — still show summary, just no distance
+      const msg = err?.response?.data?.message ?? "";
       if (
         err?.response?.status !== 400 ||
         msg !== "Run contains no GPS points"
@@ -122,7 +110,6 @@ export function ActiveRun() {
       }
     }
 
-    setFinishedRunId(idToFinish);
     setShowSummary(true);
   };
 
@@ -132,13 +119,14 @@ export function ActiveRun() {
   };
 
   const currentLocation = routePoints[routePoints.length - 1];
-  // Default map center (Mumbai — change to your city if you prefer)
   const mapCenter = currentLocation
     ? { lat: currentLocation.latitude, lng: currentLocation.longitude }
     : { lat: 19.076, lng: 72.8777 };
 
-  // ── Summary Screen ──────────────────────────────────────────────────
+  // ── Summary Screen ────────────────────────────────────────────────────────
   if (showSummary) {
+    const finalLoops: RealtimeLoop[] = runResult?.loops ?? [];
+
     return (
       <div className="flex-1 flex flex-col p-4 pt-12 space-y-6 overflow-y-auto">
         <header className="flex items-center">
@@ -153,88 +141,83 @@ export function ActiveRun() {
 
         <Card className="bg-slate-900 border-slate-800 p-6 flex flex-col items-center justify-center space-y-4">
           {runResult?.status === "REJECTED" ? (
+            /* ── Rejected run ──────────────────────────────────────────── */
             <div className="text-center space-y-2">
               <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/50">
                 <AlertTriangle className="w-10 h-10 text-red-400" />
               </div>
               <p className="text-2xl font-bold text-red-400">Run Rejected</p>
-              <p className="text-sm text-slate-400">Suspicious activity detected. Fraud score: {runResult?.fraudScore}</p>
+              <p className="text-sm text-slate-400">
+                Suspicious activity detected. Fraud score: {runResult?.fraudScore}
+              </p>
             </div>
           ) : (
             <>
+              {/* ── Flagged warning banner ─────────────────────────────── */}
               {runResult?.status === "FLAGGED" && (
                 <div className="bg-amber-900/50 border border-amber-700/50 p-3 rounded-lg flex items-start space-x-3 mb-2">
                   <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-200">This run has been flagged for review due to unusual activity (Score: {runResult?.fraudScore}). Rewards may be withheld.</p>
+                  <p className="text-xs text-amber-200">
+                    This run has been flagged for review (Score: {runResult?.fraudScore}).
+                    Rewards may be withheld.
+                  </p>
                 </div>
               )}
-              <h2 className="text-xl font-semibold text-slate-300">
-            Territory Status
-          </h2>
 
-              {checkingLoop ? (
-            <div className="flex flex-col items-center space-y-2 text-blue-400">
-              <Loader2 className="w-8 h-8 animate-spin" />
-              <p>Analyzing route for loops...</p>
-            </div>
-          ) : loopData?.loop_detected ? (
-            <div className="text-center space-y-2">
-              <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/50">
-                <MapPin className="w-10 h-10 text-emerald-400" />
-              </div>
-              <p className="text-2xl font-bold text-emerald-400">
-                Territory Captured!
-              </p>
-              <p className="text-slate-400">
-                Area: {Math.round(loopData.area_m2 || 0)} m²
-              </p>
-              <p className="text-slate-500 text-sm">
-                Gap: {Math.round(loopData.gap_m || 0)}m
-              </p>
-              {/* Auto-save status indicator */}
-              {savingTerritory && (
-                <div className="flex items-center justify-center space-x-2 text-blue-400 text-sm pt-1">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Saving to map...</span>
+              <h2 className="text-xl font-semibold text-slate-300">Territory Status</h2>
+
+              {finishing ? (
+                <div className="flex flex-col items-center space-y-2 text-blue-400">
+                  <Loader2 className="w-8 h-8 animate-spin" />
+                  <p>Processing run data…</p>
+                </div>
+              ) : finalLoops.length > 0 ? (
+                /* ── ✅ Loops detected ──────────────────────────────────── */
+                <div className="text-center space-y-6 w-full">
+                  <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-2 border border-emerald-500/50">
+                    <MapPin className="w-10 h-10 text-emerald-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-emerald-400">
+                    {finalLoops.length} {finalLoops.length === 1 ? 'Territory' : 'Territories'} Captured!
+                  </p>
+
+                  <div className="space-y-4 w-full">
+                    {finalLoops.map((loop, idx) => (
+                      <div key={loop.loopId} className="bg-slate-800/50 p-4 rounded-xl text-left border border-slate-700 w-full flex flex-col gap-2">
+                        <div className="flex justify-between items-center">
+                          <span className="font-semibold text-slate-200">Territory #{idx + 1}</span>
+                          <span className="text-sm text-slate-400">{Math.round(loop.area_m2)} m²</span>
+                        </div>
+                        <ConfidenceBadge confidence={loop.confidence} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              ) : routePoints.length === 0 ? (
+                /* ── No GPS data at all ───────────────────────────────── */
+                <div className="text-center space-y-2">
+                  <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
+                    <WifiOff className="w-10 h-10 text-amber-400" />
+                  </div>
+                  <p className="text-xl font-semibold text-slate-300">No GPS Data Recorded</p>
+                  <p className="text-sm text-slate-500">Enable location permissions and try again.</p>
+                </div>
+
+              ) : (
+                /* ── Loop not detected ────────────────────────────────── */
+                <div className="text-center space-y-3">
+                  <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-2">
+                    <MapPin className="w-10 h-10 text-slate-500" />
+                  </div>
+                  <p className="text-xl font-semibold text-slate-300">No Territories Captured</p>
+
+                  <p className="text-sm text-slate-400 max-w-xs mx-auto">
+                    Try returning closer to a path you crossed earlier to complete a loop.
+                  </p>
                 </div>
               )}
-              {territorySaved && (
-                <p className="text-emerald-500 text-sm font-medium pt-1">
-                  ✓ Territory saved to map
-                </p>
-              )}
-            </div>
-          ) : routePoints.length === 0 ? (
-            <div className="text-center space-y-2">
-              <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
-                <WifiOff className="w-10 h-10 text-amber-400" />
-              </div>
-              <p className="text-xl font-semibold text-slate-300">
-                No GPS Data Recorded
-              </p>
-              <p className="text-sm text-slate-500">
-                Enable location permissions and try again.
-              </p>
-            </div>
-          ) : (
-            <div className="text-center space-y-2">
-              <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
-                <MapPin className="w-10 h-10 text-slate-500" />
-              </div>
-              <p className="text-xl font-semibold text-slate-300">
-                No Territory Captured
-              </p>
-              {loopData?.reason && (
-                <p className="text-sm text-slate-500">{loopData.reason}</p>
-              )}
-              {loopData?.gap_m != null && (
-                <p className="text-sm text-slate-500">
-                  Gap to start: {Math.round(loopData.gap_m)}m (needs &lt;30m)
-                </p>
-              )}
-            </div>
-          )}
-          </>
+            </>
           )}
         </Card>
 
@@ -243,20 +226,15 @@ export function ActiveRun() {
           <div className="h-64 rounded-3xl overflow-hidden relative border border-slate-800">
             <CityMap center={mapCenter}>
               <RoutePolyline
-                points={routePoints.map((p) => ({
-                  lat: p.latitude,
-                  lng: p.longitude,
-                }))}
+                points={routePoints.map((p) => ({ lat: p.latitude, lng: p.longitude }))}
               />
-              {loopData?.loop_detected && (
+              {finalLoops.map(loop => (
                 <TerritoryPolygon
-                  coordinates={routePoints.map((p) => ({
-                    lat: p.latitude,
-                    lng: p.longitude,
-                  }))}
+                  key={loop.loopId}
+                  coordinates={loop.polygonCoords}
                   userId="current-user"
                 />
-              )}
+              ))}
             </CityMap>
           </div>
         )}
@@ -268,28 +246,29 @@ export function ActiveRun() {
     );
   }
 
-  // ── Active Run Screen ───────────────────────────────────────────────
+  // ── Active Run Screen ─────────────────────────────────────────────────────
   return (
     <div className="flex-1 relative flex flex-col h-full w-full">
-      {/* Full-screen map — always visible */}
+      {/* Full-screen map */}
       <div className="absolute inset-0 z-0">
         <CityMap center={mapCenter}>
           {currentLocation && (
             <UserMarker
-              position={{
-                lat: currentLocation.latitude,
-                lng: currentLocation.longitude,
-              }}
+              position={{ lat: currentLocation.latitude, lng: currentLocation.longitude }}
             />
           )}
           {routePoints.length > 0 && (
             <RoutePolyline
-              points={routePoints.map((p) => ({
-                lat: p.latitude,
-                lng: p.longitude,
-              }))}
+              points={routePoints.map((p) => ({ lat: p.latitude, lng: p.longitude }))}
             />
           )}
+          {displayLoops.map(loop => (
+            <TerritoryPolygon
+              key={loop.loopId}
+              coordinates={loop.polygonCoords}
+              userId="current-user"
+            />
+          ))}
         </CityMap>
       </div>
 
@@ -317,20 +296,25 @@ export function ActiveRun() {
               {gpsStatus === "active"
                 ? "REC"
                 : gpsStatus === "locating"
-                  ? "GPS..."
-                  : "NO GPS"}
+                ? "GPS…"
+                : "NO GPS"}
             </span>
           </div>
-          <div className="glass px-4 py-2 rounded-full pointer-events-auto shadow-lg">
-            <span className="font-mono">{routePoints.length} PTS</span>
+          <div className="flex flex-col gap-2 pointer-events-auto">
+            <div className="glass px-4 py-2 rounded-full shadow-lg text-right">
+              <span className="font-mono">{routePoints.length} PTS</span>
+            </div>
+            {displayLoops.length > 0 && (
+              <div className="glass px-4 py-2 rounded-full shadow-lg text-right border border-emerald-500/50">
+                <span className="font-mono text-emerald-400">{displayLoops.length} LOOP{displayLoops.length > 1 ? 'S' : ''}</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Loading overlay pill — shown only when starting or awaiting first GPS fix */}
+        {/* Acquiring GPS pill */}
         {(starting ||
-          (isTracking &&
-            gpsStatus === "locating" &&
-            routePoints.length === 0)) && (
+          (isTracking && gpsStatus === "locating" && routePoints.length === 0)) && (
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 glass-card px-6 py-3 rounded-full flex items-center space-x-3 shadow-2xl pointer-events-none">
             <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
             <span className="font-medium text-sm text-slate-200">
@@ -349,10 +333,7 @@ export function ActiveRun() {
             {finishing ? (
               <Loader2 className="w-8 h-8 animate-spin text-white" />
             ) : (
-              <StopCircle
-                className="w-10 h-10 text-white"
-                fill="currentColor"
-              />
+              <StopCircle className="w-10 h-10 text-white" fill="currentColor" />
             )}
           </button>
         </div>
