@@ -6,7 +6,7 @@ export const runsApi = {
     const res = await apiClient.post<Run>("/runs/start");
     return res.data;
   },
-  savePoint: async (runId: string, point: { latitude: number; longitude: number; accuracy?: number | null; speed?: number | null }): Promise<GpsPoint> => {
+  savePoint: async (runId: string, point: { latitude: number; longitude: number; accuracy?: number | null; speed?: number | null; sequence_number: number; client_timestamp: string }): Promise<GpsPoint> => {
     const res = await apiClient.post<GpsPoint>(`/runs/${runId}/points`, point);
     return res.data;
   },

@@ -46,6 +46,7 @@ export interface FinishRunResponse {
   totalPoints: number;
   distanceKm: number;
   status: string;
+  fraudScore?: number;
 }
 
 export interface TerritoryLoopResponse {
@@ -57,4 +58,23 @@ export interface TerritoryLoopResponse {
   reason?: string;
   /** WKT polygon string. Present only when loop_detected === true. */
   polygonWkt?: string | null;
+}
+
+export interface LeaderboardUser {
+  userId: string;
+  username: string;
+  distance: number;
+  loops: number;
+  runs: number;
+  rank: number;
+}
+
+export interface LeaderboardResponse {
+  data: LeaderboardUser[];
+  meta: {
+    page: number;
+    limit: number;
+    totalPages: number;
+    totalRecords: number;
+  };
 }
