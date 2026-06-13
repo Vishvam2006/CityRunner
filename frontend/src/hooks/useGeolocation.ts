@@ -62,17 +62,20 @@ export function useGeolocation() {
   // (and restarting the GPS watcher) on every render.  Previously the dep
   // array included `addRoutePoint` and `savePoint` which are new references
   // every render, causing the watcher to restart constantly and drop points.
-  const addRoutePointRef = useRef(addRoutePoint);
-  const savePointRef     = useRef(savePointMutate);
-  const addDetectedLoopRef = useRef(addDetectedLoop);
-  useEffect(() => { addRoutePointRef.current = addRoutePoint;  });
-  useEffect(() => { savePointRef.current     = savePointMutate; });
-  useEffect(() => { addDetectedLoopRef.current = addDetectedLoop; });
+const addRoutePointRef = useRef(addRoutePoint);
+const savePointRef = useRef(savePoint);
+
+useEffect(() => {
+  addRoutePointRef.current = addRoutePoint;
+}, [addRoutePoint]);
+
+useEffect(() => {
+  savePointRef.current = savePoint;
+}, [savePoint]);
 
   // Tracking state that must persist across watchPosition callbacks
   const lastSavedMsRef       = useRef(0);
   const lastSavedPosRef      = useRef<{ latitude: number; longitude: number } | null>(null);
-  const sequenceNumberRef    = useRef(0);
 
   // Reset per-run state when a new run starts
   useEffect(() => {
