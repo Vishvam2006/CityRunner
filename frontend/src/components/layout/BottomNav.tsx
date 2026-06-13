@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Home, Map as MapIcon, User, Flag } from "lucide-react";
+import { Home, Map as MapIcon, User, Flag, Trophy } from "lucide-react";
 import { useRunStore } from "../../store/run.store";
 
 export function BottomNav() {
@@ -14,10 +14,11 @@ export function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-slate-900/90 backdrop-blur-lg border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
-      <div className="flex justify-around items-center h-16 px-4">
-        <NavItem to="/" icon={<Home size={24} />} label="Home" active={isActive("/")} />
-        <NavItem to="/territory" icon={<Flag size={24} />} label="Territory" active={isActive("/territory")} />
-        <NavItem to="/profile" icon={<User size={24} />} label="Profile" active={isActive("/profile")} />
+      <div className="flex justify-around items-center h-16 px-2">
+        <NavItem to="/" icon={<Home size={22} />} label="Home" active={isActive("/")} />
+        <NavItem to="/territory" icon={<Flag size={22} />} label="Territory" active={isActive("/territory")} />
+        <NavItem to="/leaderboard" icon={<Trophy size={22} />} label="Rankings" active={isActive("/leaderboard")} />
+        <NavItem to="/profile" icon={<User size={22} />} label="Profile" active={isActive("/profile")} />
       </div>
     </nav>
   );

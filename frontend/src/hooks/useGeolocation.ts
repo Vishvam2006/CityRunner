@@ -13,8 +13,14 @@ export function useGeolocation() {
   const { isTracking, currentRunId, addRoutePoint } = useRunStore();
   const { mutate: savePoint } = useSavePoint();
   const lastSavedRef = useRef(0);
+  const sequenceNumberRef = useRef(0);
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>("idle");
   const [gpsError, setGpsError] = useState<GpsError | null>(null);
+
+  useEffect(() => {
+    // Reset sequence number when a new run starts tracking
+    sequenceNumberRef.current = 0;
+  }, [currentRunId]);
 
   useEffect(() => {
     let watchId: number;
@@ -37,11 +43,16 @@ export function useGeolocation() {
           setGpsStatus("active");
           setGpsError(null);
 
+          const now = Date.now();
+          sequenceNumberRef.current += 1;
+
           const point = {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy,
             speed: position.coords.speed,
+            sequence_number: sequenceNumberRef.current,
+            client_timestamp: new Date(now).toISOString(),
           };
 
 
@@ -49,7 +60,6 @@ export function useGeolocation() {
           addRoutePoint(point);
 
           // Save to backend every 3 seconds
-          const now = Date.now();
           if (now - lastSavedRef.current >= 3000) {
             savePoint({ runId: currentRunId, point });
             lastSavedRef.current = now;
