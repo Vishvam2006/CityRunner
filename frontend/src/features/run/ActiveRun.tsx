@@ -63,9 +63,6 @@ export function ActiveRun() {
     stopTracking,
     resetRun,
   } = useRunStore();
-  const [showSummary, setShowSummary] = useState(false);
-  const [finishedRunId, setFinishedRunId] = useState<string | null>(null);
-  const [runResult, setRunResult] = useState<any>(null);
 
   const [showSummary,    setShowSummary]    = useState(false);
   const [runResult,      setRunResult]      = useState<any>(null);
@@ -144,56 +141,7 @@ export function ActiveRun() {
 
         <Card className="bg-slate-900 border-slate-800 p-6 flex flex-col items-center justify-center space-y-4">
           {runResult?.status === "REJECTED" ? (
-            <div className="text-center space-y-2">
-              <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/50">
-                <AlertTriangle className="w-10 h-10 text-red-400" />
-              </div>
-              <p className="text-2xl font-bold text-red-400">Run Rejected</p>
-              <p className="text-sm text-slate-400">Suspicious activity detected. Fraud score: {runResult?.fraudScore}</p>
-            </div>
-          ) : (
-            <>
-              {runResult?.status === "FLAGGED" && (
-                <div className="bg-amber-900/50 border border-amber-700/50 p-3 rounded-lg flex items-start space-x-3 mb-2">
-                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-200">This run has been flagged for review due to unusual activity (Score: {runResult?.fraudScore}). Rewards may be withheld.</p>
-                </div>
-              )}
-              <h2 className="text-xl font-semibold text-slate-300">Territory Status</h2>
-
-              {checkingLoop ? (
-            <div className="flex flex-col items-center space-y-2 text-blue-400">
-              <Loader2 className="w-8 h-8 animate-spin" />
-              <p>Analyzing route for loops...</p>
-            </div>
-          ) : loopData?.loop_detected ? (
-            <div className="text-center space-y-2">
-              <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/50">
-                <MapPin className="w-10 h-10 text-emerald-400" />
-              </div>
-              <p className="text-2xl font-bold text-emerald-400">
-                Territory Captured!
-              </p>
-              <p className="text-slate-400">
-                Area: {Math.round(loopData.area_m2 || 0)} m²
-              </p>
-              <p className="text-slate-500 text-sm">
-                Gap: {Math.round(loopData.gap_m || 0)}m
-              </p>
-              {/* Auto-save status indicator */}
-              {savingTerritory && (
-                <div className="flex items-center justify-center space-x-2 text-blue-400 text-sm pt-1">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Saving to map...</span>
-                </div>
-              )}
-              {territorySaved && (
-                <p className="text-emerald-500 text-sm font-medium pt-1">
-                  ✓ Territory saved to map
-                </p>
-              )}
-            </div>
-          ) : routePoints.length === 0 ? (
+            /* ── Rejected run ──────────────────────────────────────────── */
             <div className="text-center space-y-2">
               <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/50">
                 <AlertTriangle className="w-10 h-10 text-red-400" />
@@ -270,8 +218,6 @@ export function ActiveRun() {
                 </div>
               )}
             </>
-          )}
-          </>
           )}
         </Card>
 

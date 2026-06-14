@@ -34,6 +34,7 @@ import {
   haversineM,
   MIN_SKIP_SEGMENTS,
   MIN_SEGMENT_LENGTH_M,
+  MIN_PRIOR_SEGMENT_LENGTH_M,
   MIN_LOOP_AREA_M2,
 } from "../utils/geometryUtils";
 
@@ -57,32 +58,34 @@ export interface RealtimeLoopResult {
 /**
  * Confidence score for a loop detected via segment intersection.
  *
- * Base: 30 pts (better than proximity detection's heuristic).
- * Area bonus:      up to 30 pts
- * Perimeter bonus: up to 20 pts
- * Point density:   up to 20 pts
+ * Base: 40 pts (better than proximity detection's heuristic).
+ * Area bonus:      up to 25 pts
+ * Perimeter bonus: up to 15 pts
+ * Density bonus:   up to 20 pts
  */
 function computeLoopConfidence(
   areaM2: number,
   perimeterM: number,
   numLoopPoints: number
 ): number {
-  let score = 30;
+  let score = 40;
 
-  // Area
-  if      (areaM2 >= 10_000) score += 30;
-  else if (areaM2 >=  1_000) score += 20;
-  else if (areaM2 >=    100) score += 10;
+  // Area: more forgiving brackets
+  if      (areaM2 >= 5_000) score += 25;
+  else if (areaM2 >=   500) score += 15;
+  else if (areaM2 >=    50) score +=  5;
 
   // Perimeter
-  if      (perimeterM >= 500) score += 20;
-  else if (perimeterM >= 200) score += 12;
-  else                         score +=  5;
+  if      (perimeterM >= 300) score += 15;
+  else if (perimeterM >= 100) score += 10;
+  else                        score +=  5;
 
-  // Point density (more points → less noise-induced)
-  if      (numLoopPoints >= 30) score += 20;
-  else if (numLoopPoints >= 15) score += 12;
-  else if (numLoopPoints >=  8) score +=  6;
+  // Point density (points per 100m of perimeter)
+  // Higher density = better adherence to physical path
+  const densityPer100m = perimeterM > 0 ? (numLoopPoints / perimeterM) * 100 : 0;
+  if      (densityPer100m >= 15) score += 20;
+  else if (densityPer100m >= 10) score += 12;
+  else if (densityPer100m >=  5) score +=  6;
 
   return Math.min(score, 100);
 }
@@ -114,7 +117,10 @@ export async function processNewSegment(
   //  Stationary GPS drift (e.g. 1–2 m oscillations while standing still)
   //  would pollute run_segments and trigger spurious intersections.
   const segLenM = haversineM(lat1, lng1, lat2, lng2);
-  if (segLenM < MIN_SEGMENT_LENGTH_M) return null;
+  if (segLenM < MIN_SEGMENT_LENGTH_M) {
+    console.info(`[realtimeLoop] ⏭️ Skipped: Segment length ${segLenM.toFixed(2)}m < ${MIN_SEGMENT_LENGTH_M}m minimum`);
+    return null;
+  }
 
   // ── 2. Insert segment ─────────────────────────────────────────────────────
   const newSegId = await insertSegment(
@@ -131,24 +137,30 @@ export async function processNewSegment(
   if (maxSeqTo < 0) return null; // not enough history yet
 
   const intersection = await findIntersectingSegment(
-    runId, newSegId, maxSeqTo, MIN_SEGMENT_LENGTH_M,
+    runId, newSegId, maxSeqTo, MIN_PRIOR_SEGMENT_LENGTH_M,
     lat1, lng1, lat2, lng2
   );
-  if (!intersection) return null;
+  if (!intersection) {
+    // Expected behavior most of the time (running straight)
+    return null;
+  }
 
   // ── 4. Parse intersection point ───────────────────────────────────────────
   //  PostGIS returns WKT.  Collinear overlaps produce LINESTRING — we skip
   //  those.  Only POINT intersections (real crossings) continue.
   const intersectionPt = parseIntersectionPoint(intersection.intersection_wkt);
-  if (!intersectionPt) return null;
+  if (!intersectionPt) {
+    console.info(`[realtimeLoop] ❌ Rejected: Intersection geometry '${intersection.intersection_wkt}' is not a valid POINT`);
+    return null;
+  }
 
   // ── 5. Fetch interior GPS points ──────────────────────────────────────────
   //  The loop ring is: P_int → GPS[seq_to_old] → ... → GPS[seqFrom] → P_int
   //  Where seq_to_old = intersection.seq_to  (end of the old segment)
   //        seqFrom    = previous sequence number (start of the new segment)
   const loopPoints = await getLoopPoints(runId, intersection.seq_to, seqFrom);
-  if (loopPoints.length < 2) {
-    // Need at least 2 interior points for a non-degenerate polygon
+  if (loopPoints.length < 1) {
+    console.info(`[realtimeLoop] ❌ Rejected: Insufficient interior points (${loopPoints.length} < 1)`);
     return null;
   }
 
@@ -161,13 +173,13 @@ export async function processNewSegment(
   //  a MultiPolygon or GeometryCollection.
   const polyResult = await validateAndExtractPolygon(ringWkt);
   if (!polyResult) {
-    console.debug("[realtimeLoop] Polygon validation failed — degenerate geometry");
+    console.info("[realtimeLoop] ❌ Rejected: Polygon validation failed — degenerate geometry");
     return null;
   }
 
   // ── 8. Minimum area ───────────────────────────────────────────────────────
   if (polyResult.area_m2 < MIN_LOOP_AREA_M2) {
-    console.debug(`[realtimeLoop] Loop area ${Math.round(polyResult.area_m2)} m² < ${MIN_LOOP_AREA_M2} m² minimum`);
+    console.info(`[realtimeLoop] ❌ Rejected: Loop area ${polyResult.area_m2.toFixed(1)}m² < ${MIN_LOOP_AREA_M2}m² minimum`);
     return null;
   }
 
@@ -176,7 +188,7 @@ export async function processNewSegment(
     userId, runId, polyResult.polygon_wkt, polyResult.area_m2
   );
   if (!farmingOk) {
-    console.debug("[realtimeLoop] Farming check failed — duplicate territory");
+    console.info(`[realtimeLoop] ❌ Rejected: Farming check failed (duplicate territory) area=${polyResult.area_m2.toFixed(1)}m²`);
     return null;
   }
 
@@ -197,7 +209,11 @@ export async function processNewSegment(
   );
 
   console.info(
-    `[realtimeLoop] ✅ Loop captured — run=${runId} area=${Math.round(polyResult.area_m2)}m² confidence=${confidence}`
+    `[realtimeLoop] ✅ Loop captured! run=${runId} ` +
+    `area=${polyResult.area_m2.toFixed(1)}m² ` +
+    `perimeter=${polyResult.perimeter_m.toFixed(1)}m ` +
+    `points=${loopPoints.length} ` +
+    `confidence=${confidence}`
   );
 
   return {

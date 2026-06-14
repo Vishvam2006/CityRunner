@@ -102,8 +102,6 @@ describe("geometryUtils", () => {
   describe("detectAllLoops (synthetic GPS testing)", () => {
     const MUMBAI_LAT = 19.076;
     const MUMBAI_LNG = 72.877;
-    const MIN_SKIP = 8;
-    const MIN_AREA = 50;
 
     it("detects a clean circular loop", () => {
       // Circle with 100m radius (~314m circumference, ~31k area), 60 points
@@ -114,7 +112,7 @@ describe("geometryUtils", () => {
       // Let's add 10 points from the start to force a crossing.
       const runPath = [...points, ...points.slice(0, 15)];
 
-      const loops = detectAllLoops(runPath, MIN_SKIP, MIN_AREA);
+      const loops = detectAllLoops(runPath);
       expect(loops.length).toBeGreaterThanOrEqual(1);
       
       const loop = loops[0];
@@ -127,21 +125,21 @@ describe("geometryUtils", () => {
       const points = generateSquare(MUMBAI_LAT, MUMBAI_LNG, 100, 10);
       const runPath = addNoise([...points, ...points.slice(0, 5)], 3.0); // 3m GPS noise
 
-      const loops = detectAllLoops(runPath, MIN_SKIP, MIN_AREA);
+      const loops = detectAllLoops(runPath);
       expect(loops.length).toBeGreaterThanOrEqual(1); // May find multiple crossings in noise
       expect(loops[0].estimatedAreaM2).toBeGreaterThan(9000); // Nominal 10k
     });
 
     it("does not detect loops in a straight line", () => {
       const path = generateStraightLine(MUMBAI_LAT, MUMBAI_LNG, 1000, 50);
-      const loops = detectAllLoops(path, MIN_SKIP, MIN_AREA);
+      const loops = detectAllLoops(path);
       expect(loops.length).toBe(0);
     });
 
     it("does not trigger on zigzag path (parallel roads)", () => {
       // Zigzag back and forth, but segments don't cross
       const path = generateZigzag(MUMBAI_LAT, MUMBAI_LNG, 50, 20, 40);
-      const loops = detectAllLoops(path, MIN_SKIP, MIN_AREA);
+      const loops = detectAllLoops(path);
       expect(loops.length).toBe(0);
     });
 
@@ -159,18 +157,33 @@ describe("geometryUtils", () => {
         ...rightCircle.slice(0, 5) // Close right
       ];
 
-      const loops = detectAllLoops(runPath, MIN_SKIP, MIN_AREA);
+      const loops = detectAllLoops(runPath);
       expect(loops.length).toBeGreaterThanOrEqual(2);
       expect(loops[0].estimatedAreaM2).toBeGreaterThan(30000);
+    });
+
+    it("detects a small urban loop (15m x 15m) with new lower thresholds", () => {
+      // 15m x 15m square = 225m² area. 
+      // 10 pts per side = 40 pts total (1.5m spacing, well under 2m so we don't trip MIN_SEGMENT)
+      // Actually let's use 3 pts per side = 12 pts total (5m spacing)
+      const points = generateSquare(MUMBAI_LAT, MUMBAI_LNG, 15, 3);
+      const runPath = [...points, ...points.slice(0, 3)]; // Close the loop
+
+      // Uses new default thresholds (MIN_SKIP_SEGMENTS=5, MIN_LOOP_AREA_M2=25)
+      const loops = detectAllLoops(runPath);
+      expect(loops.length).toBeGreaterThanOrEqual(1);
+      
+      // Area should be exactly 225m² (before any ST_MakeValid shrinking, which isn't tested here)
+      expect(loops[0].estimatedAreaM2).toBeGreaterThan(200);
+      expect(loops[0].estimatedAreaM2).toBeLessThan(250);
     });
 
     it("ignores stationary noise (too few segments skipped)", () => {
       // Small random walk (all within 5m, meaning it crosses itself constantly)
       const path = addNoise(generateStraightLine(MUMBAI_LAT, MUMBAI_LNG, 2, 20), 5.0);
       
-      // Because MIN_SKIP is 8, the inner loop won't check recent segments,
-      // and stationary noise rarely forms a 50m² loop after 8 points anyway.
-      const loops = detectAllLoops(path, MIN_SKIP, MIN_AREA);
+      // With MIN_SKIP = 5, stationary noise rarely forms a 25m² loop after 5 points anyway.
+      const loops = detectAllLoops(path);
       expect(loops.length).toBe(0);
     });
   });

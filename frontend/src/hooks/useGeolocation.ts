@@ -50,10 +50,9 @@ function haversineM(
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useGeolocation() {
-  const { isTracking, currentRunId, addRoutePoint } = useRunStore();
-  const { mutate: savePoint } = useSavePoint();
-  const lastSavedRef = useRef(0);
-  const sequenceNumberRef = useRef(0);
+  const { isTracking, currentRunId, addRoutePoint, addDetectedLoop } = useRunStore();
+  const { mutate: savePointMutate } = useSavePoint();
+
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>("idle");
   const [gpsError,  setGpsError]  = useState<GpsError | null>(null);
 
@@ -76,12 +75,10 @@ export function useGeolocation() {
 
   // Reset per-run state when a new run starts
   useEffect(() => {
-    // Reset sequence number when a new run starts tracking
     sequenceNumberRef.current = 0;
+    lastSavedMsRef.current    = 0;
+    lastSavedPosRef.current   = null;
   }, [currentRunId]);
-
-  useEffect(() => {
-    let watchId: number;
 
   // ── GPS watcher ───────────────────────────────────────────────────────────
   // Deps: only `isTracking` and `currentRunId`.  Callbacks are accessed via
@@ -103,17 +100,10 @@ export function useGeolocation() {
 
     const runId = currentRunId; // Capture for closure
 
-          const now = Date.now();
-          sequenceNumberRef.current += 1;
-
-          const point = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            speed: position.coords.speed,
-            sequence_number: sequenceNumberRef.current,
-            client_timestamp: new Date(now).toISOString(),
-          };
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude, accuracy, speed } = position.coords;
+        const now = Date.now();
 
         setGpsStatus("active");
         setGpsError(null);
@@ -129,10 +119,32 @@ export function useGeolocation() {
         };
         addRoutePointRef.current(point);
 
-          // Save to backend every 3 seconds
-          if (now - lastSavedRef.current >= 3000) {
-            savePoint({ runId: currentRunId, point });
-            lastSavedRef.current = now;
+        // ── Quality gate before saving to backend ────────────────────────
+
+        // 1. Accuracy filter: reject poor GPS fixes
+        if (accuracy !== null && accuracy > MAX_ACCEPTABLE_ACCURACY_M) {
+          // Still update UI (handled above) but don't pollute the DB
+          return;
+        }
+
+        // 2. Client-side speed / outlier filter
+        const lastPos = lastSavedPosRef.current;
+        if (lastPos) {
+          const distM   = haversineM(lastPos.latitude, lastPos.longitude, latitude, longitude);
+          const deltaMs = now - lastSavedMsRef.current;
+          const deltaSec = deltaMs / 1000;
+
+          if (deltaSec > 0) {
+            const speedMps = distM / deltaSec;
+            if (speedMps > MAX_PLAUSIBLE_SPEED_MPS) {
+              // GPS spike: skip this point entirely (don't add to backend,
+              // and don't update lastSaved so the next point is compared
+              // against the last good one)
+              console.warn(
+                `[GPS] Outlier rejected: ${speedMps.toFixed(1)} m/s — likely sensor glitch`
+              );
+              return;
+            }
           }
 
           // 3. Distance / time gate: only save when runner has moved

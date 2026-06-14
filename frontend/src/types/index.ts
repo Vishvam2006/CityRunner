@@ -78,6 +78,16 @@ export interface FinishRunResponse {
   distanceKm: number;
   status: string;
   fraudScore?: number;
+  /** Number of loops captured during the run. */
+  loopsDetected: number;
+  /** Full loop details for the summary screen. */
+  loops: RealtimeLoop[];
+}
+
+/** Response from GET /runs/:runId/loops */
+export interface RunLoopsResponse {
+  runId: string;
+  loops: RealtimeLoop[];
 }
 
 export interface LeaderboardResponse {
@@ -99,12 +109,3 @@ export interface LeaderboardUser {
   rank: number;
 }
 
-export interface LeaderboardResponse {
-  data: LeaderboardUser[];
-  meta: {
-    page: number;
-    limit: number;
-    totalPages: number;
-    totalRecords: number;
-  };
-}
