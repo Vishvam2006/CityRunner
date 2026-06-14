@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Home, Map as MapIcon, User, Flag, Trophy } from "lucide-react";
+import { Home, User, Flag, Trophy } from "lucide-react";
 import { useRunStore } from "../../store/run.store";
 
 export function BottomNav() {
