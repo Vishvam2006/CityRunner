@@ -85,11 +85,20 @@ export async function findIntersectingSegment(
   runId: string,
   newSegId: string,
   maxSeqTo: number,
-  minSegLenM: number,
+  minPriorSegLenM: number,
   lat1: number, lng1: number,
   lat2: number, lng2: number
 ): Promise<IntersectionResult | null> {
-  const result = await pool.query<IntersectionResult>(
+
+  // ── GPS tolerance ───────────────────────────────────────────────────────
+  // 0.00003 degrees ≈ 3.3 m at mid-latitudes.  Covers typical urban GPS
+  // error (3–5 m CEP) so near-miss crossings are detected.
+  const GPS_TOLERANCE_DEG = 0.00003;
+
+  const result = await pool.query<IntersectionResult & {
+    is_exact: boolean;
+    distance_m: string;
+  }>(
     `
     WITH new_seg AS (
       SELECT ST_SetSRID(
@@ -99,29 +108,69 @@ export async function findIntersectingSegment(
     ),
     candidates AS (
       SELECT
-        rs.id                                                     AS segment_id,
+        rs.id                                         AS segment_id,
         rs.seq_from,
         rs.seq_to,
-        ST_GeometryType(ST_Intersection(rs.geom, ns.geom))       AS geom_type,
-        ST_AsText(ST_Intersection(rs.geom, ns.geom))             AS intersection_wkt
+        rs.geom                                       AS old_geom,
+        ns.geom                                       AS new_geom,
+        ST_Intersects(rs.geom, ns.geom)              AS exact_hit,
+        ST_Distance(rs.geom::geography, ns.geom::geography) AS distance_m
       FROM run_segments rs
       CROSS JOIN new_seg ns
       WHERE rs.run_id = $1
         AND rs.id    != $2
         AND rs.seq_to <= $3
-        AND ST_Intersects(rs.geom, ns.geom)           -- uses GIST index
-        AND ST_Length(rs.geom::geography) >= $4        -- skip noise segments
+        AND ST_DWithin(rs.geom, ns.geom, $4)         -- tolerance-aware (GIST)
+        AND ST_Length(rs.geom::geography) >= $9        -- skip degenerate segments
       ORDER BY rs.seq_to DESC                          -- most recent = smallest loop
-      LIMIT 3                                          -- examine top-3 candidates
+      LIMIT 10                                         -- examine top-10 candidates
+    ),
+    resolved AS (
+      SELECT
+        segment_id,
+        seq_from,
+        seq_to,
+        exact_hit                                     AS is_exact,
+        distance_m,
+        CASE
+          -- Exact crossing: use the real intersection point
+          WHEN exact_hit AND ST_GeometryType(ST_Intersection(old_geom, new_geom)) = 'ST_Point'
+            THEN ST_AsText(ST_Intersection(old_geom, new_geom))
+          -- Near-miss within tolerance: use closest point on old segment as virtual intersection
+          WHEN NOT exact_hit
+            THEN ST_AsText(ST_ClosestPoint(old_geom, new_geom))
+          -- Exact hit but LINESTRING (collinear overlap): skip
+          ELSE NULL
+        END AS intersection_wkt
+      FROM candidates
     )
-    SELECT segment_id, seq_from, seq_to, intersection_wkt
-    FROM   candidates
-    WHERE  geom_type = 'ST_Point'                      -- real crossing only
+    SELECT segment_id, seq_from, seq_to, intersection_wkt, is_exact,
+           distance_m::text AS distance_m
+    FROM   resolved
+    WHERE  intersection_wkt IS NOT NULL
+    ORDER  BY is_exact DESC, distance_m ASC            -- prefer exact hits, then closest near-miss
     LIMIT  1
     `,
-    [runId, newSegId, maxSeqTo, minSegLenM, lat1, lng1, lat2, lng2]
+    [runId, newSegId, maxSeqTo, GPS_TOLERANCE_DEG, lat1, lng1, lat2, lng2, minPriorSegLenM]
   );
-  return result.rows[0] ?? null;
+
+  const row = result.rows[0];
+  if (!row) return null;
+
+  // Log intersection diagnostics
+  const distM = parseFloat(row.distance_m);
+  console.info(
+    `[loopRepo] Intersection found: segment=${row.segment_id} ` +
+    `seq=${row.seq_from}→${row.seq_to} exact=${row.is_exact} ` +
+    `distance=${distM.toFixed(2)}m wkt=${row.intersection_wkt}`
+  );
+
+  return {
+    segment_id: row.segment_id,
+    seq_from:   row.seq_from,
+    seq_to:     row.seq_to,
+    intersection_wkt: row.intersection_wkt,
+  };
 }
 
 // ── GPS point retrieval for polygon construction ───────────────────────────────

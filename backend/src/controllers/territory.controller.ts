@@ -1,20 +1,27 @@
 import { Response } from "express";
 
 import { AuthRequest } from "../types/auth-request";
-
+import { findRunByIdAndUserId, getRunPoints } from "../repositories/run.repository";
 import {
-  findRunByIdAndUserId,
-  getRunPoints,
-} from "../repositories/run.repository";
-
-import {
-  createTerritoryRepo,
   detectLoopForRun,
+  createTerritoryRepo,
   getTerritories as getTerritoriesRepo,
 } from "../repositories/territory.repository";
 
-const MIN_POINTS = 10;
-
+/**
+ * checkLoop — on-demand loop check for a completed run.
+ *
+ * FIX: Previously built the territory WKT polygon in JavaScript by
+ * concatenating raw GPS coordinates, producing a self-intersecting ring that
+ * crashed PostGIS's ST_GeomFromText.  Now the polygon WKT comes directly from
+ * PostGIS's ST_ConvexHull (via detectLoopForRun), which is always a valid,
+ * simple polygon regardless of GPS noise or path crossings.
+ *
+ * NOTE: The primary frontend flow no longer calls this endpoint — the
+ * finishRun response now includes the full loop result (eliminating a
+ * duplicate PostGIS round-trip).  This endpoint is kept for debugging /
+ * third-party integrations.
+ */
 export const checkLoop = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
@@ -31,38 +38,21 @@ export const checkLoop = async (req: AuthRequest, res: Response) => {
 
     const points = await getRunPoints(runId);
 
-    if (points.length < MIN_POINTS) {
-      return res.status(200).json({
-        success: true,
-        loop_detected: false,
-        reason: `Not enough points (${points.length}/${MIN_POINTS})`,
-        area_m2: null,
-        point_count: points.length,
-        polygonWkt: null,
+    if (points.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Run has no GPS points",
       });
     }
 
     const result = await detectLoopForRun(runId, userId, points);
 
-    let polygonWkt: string | null = null;
-
-    if (result.loop_detected) {
-      const wktPoints = points
-        .map(
-          (p: { latitude: number; longitude: number }) =>
-            `${p.longitude} ${p.latitude}`,
-        )
-        .join(", ");
-
-      const firstPoint = `${points[0].longitude} ${points[0].latitude}`;
-
-      polygonWkt = `POLYGON((${wktPoints}, ${firstPoint}))`;
-    }
-
     return res.status(200).json({
       ...result,
       point_count: points.length,
-      polygonWkt,
+      // Map polygon_wkt → polygonWkt for API consistency
+      polygonWkt: result.polygon_wkt ?? null,
+      polygon_wkt: undefined,
     });
   } catch (error) {
     console.error("[checkLoop]", error);
@@ -78,9 +68,7 @@ export const createTerritory = async (req: AuthRequest, res: Response) => {
     const { polygonWkt, area } = req.body;
 
     if (!polygonWkt || area === undefined) {
-      return res.status(400).json({
-        message: "polygonWkt and area are required",
-      });
+      return res.status(400).json({ message: "polygonWkt and area are required" });
     }
 
     const territory = await createTerritoryRepo(userId, polygonWkt, area);

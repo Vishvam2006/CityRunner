@@ -30,15 +30,24 @@ export interface LoopCandidate {
 
 /** Skip this many trailing segments before checking for intersections.
  *  Prevents GPS zigzag from triggering false loops.
- *  At 8 m/segment → 64 m minimum path before detection starts. */
-export const MIN_SKIP_SEGMENTS = 8;
+ *  At 8 m/segment → 40 m minimum path before detection starts.
+ *  Reduced from 8 → 5 to allow smaller urban loops (~50 m per side). */
+export const MIN_SKIP_SEGMENTS = 5;
 
-/** Reject loops whose PostGIS-computed area is below this threshold. */
-export const MIN_LOOP_AREA_M2 = 50;
+/** Reject loops whose PostGIS-computed area is below this threshold.
+ *  Reduced from 50 → 25 m² to capture small urban block loops while
+ *  staying well above GPS noise loops (typically < 10 m²). */
+export const MIN_LOOP_AREA_M2 = 25;
 
-/** Minimum GPS segment length (metres).
+/** Minimum GPS segment length (metres) for the CURRENT (new) segment.
  *  Segments shorter than this are stationary noise and are skipped. */
 export const MIN_SEGMENT_LENGTH_M = 2;
+
+/** Minimum GPS segment length (metres) for PRIOR segment candidates.
+ *  More lenient than MIN_SEGMENT_LENGTH_M because we don't want to
+ *  exclude short-but-valid prior segments that the runner crossed over.
+ *  Set low enough that only truly degenerate zero-length segments are excluded. */
+export const MIN_PRIOR_SEGMENT_LENGTH_M = 0.5;
 
 // ── Haversine Distance ────────────────────────────────────────────────────────
 

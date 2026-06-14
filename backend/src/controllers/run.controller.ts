@@ -10,21 +10,19 @@ import {
   finishRunInDb,
   addFraudLog,
   updateRunAntiCheat,
+  LastPointPayload,
 } from "../repositories/run.repository";
-import { getRunLoops } from "../repositories/loop.repository";
-import { updateUserStats } from "../repositories/user.repository";
-import {
-  processNewSegment,
-  RealtimeLoopResult,
-} from "../services/realtimeLoop.service";
 
-import { calculateDistance } from "../utils/calculateDistance";
+import { getRunLoops } from "../repositories/loop.repository";
+import { processNewSegment, RealtimeLoopResult } from "../services/realtimeLoop.service";
+import { wktPolygonToCoords }                    from "../utils/geometryUtils";
+import { updateUserStats }                        from "../repositories/user.repository";
+import { calculateDistance }                      from "../utils/calculateDistance";
 import {
   validateSequence,
   validateBurstUpload,
   validateMovement,
 } from "../utils/antiCheat";
-import { wktPolygonToCoords } from "../utils/geometryUtils";
 
 // ── startRun ──────────────────────────────────────────────────────────────────
 
@@ -87,22 +85,16 @@ export const savePoint = async (req: AuthRequest, res: Response) => {
     if (!run) return res.status(404).json({ message: "Run not found" });
 
     const newDate = new Date(client_timestamp);
-    if (Number.isNaN(newDate.getTime())) {
-      return res.status(400).json({ message: "Invalid client_timestamp" });
-    }
 
-    const prevLat = run.last_lat as number | null;
-    const prevLng = run.last_lng as number | null;
-    const prevSeq = run.last_sequence_number as number;
-    let accumulatedFraudScore = 0;
-
-    // 1. Validate Sequence
-    const seqCheck = validateSequence(sequence_number, prevSeq);
+    // ── Sequence check ────────────────────────────────────────────────────
+    const seqCheck = validateSequence(sequence_number, run.last_sequence_number);
     if (!seqCheck.isValid) {
       await addFraudLog(runId, seqCheck.reason!, seqCheck.fraudScoreAdded);
       await updateRunAntiCheat(runId, seqCheck.fraudScoreAdded, sequence_number);
       return res.status(400).json({ message: seqCheck.reason });
     }
+
+    let accumulatedFraudScore = 0;
 
     // ── Burst / movement checks (O(1) via last-point snapshot) ───────────
     if (run.last_lat != null && run.last_lng != null && run.last_client_ts != null) {
@@ -138,23 +130,31 @@ export const savePoint = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Point is valid (even if highly suspicious, we store it and add score)
-    await updateRunAntiCheat(runId, accumulatedFraudScore, sequence_number, {
+    // ── Persist point ────────────────────────────────────────────────────
+    const lastPointPayload: LastPointPayload = {
       latitude,
       longitude,
       client_timestamp,
       server_received_at: new Date(),
       accuracy: accuracy ?? null,
-    });
+    };
+
+    // Capture the previous-point snapshot BEFORE the update overwrites it.
+    // These values are what we pass to processNewSegment as the segment origin.
+    const prevSeq = run.last_sequence_number as number;
+    const prevLat = run.last_lat            as number | null;
+    const prevLng = run.last_lng            as number | null;
+
+    await updateRunAntiCheat(
+      runId,
+      accumulatedFraudScore,
+      sequence_number,
+      lastPointPayload
+    );
 
     const point = await addGpsPoint(
-      runId,
-      latitude,
-      longitude,
-      accuracy,
-      speed,
-      sequence_number,
-      client_timestamp
+      runId, latitude, longitude,
+      accuracy, speed, sequence_number, client_timestamp
     );
 
     // ── Real-time loop detection ──────────────────────────────────────────
@@ -162,7 +162,11 @@ export const savePoint = async (req: AuthRequest, res: Response) => {
     // has at least one prior saved point.
     let loopDetected: RealtimeLoopResult | null = null;
 
-    if (run.fraud_score < 60 && prevLat != null && prevLng != null) {
+    if (
+      run.fraud_score < 60 &&   // run not rejected
+      prevLat != null &&
+      prevLng != null
+    ) {
       try {
         loopDetected = await processNewSegment(
           runId, userId,
@@ -282,30 +286,36 @@ export const finishRun = async (req: AuthRequest, res: Response) => {
 
     const distanceKm = calculateDistance(points);
 
+    // Determine status from accumulated fraud score
     let status = "VALID";
-    if (run.fraud_score >= 60) {
-      status = "REJECTED";
-    } else if (run.fraud_score >= 30) {
-      status = "FLAGGED";
-    }
+    if      (run.fraud_score >= 60) status = "REJECTED";
+    else if (run.fraud_score >= 30) status = "FLAGGED";
 
     const finishedRun = await finishRunInDb(runId, distanceKm, status);
 
-    let loopsDetected = 0;
+    // Fetch all loops detected during this run (already saved in real-time)
+    const rawLoops   = await getRunLoops(runId);
+    const loopsCount = rawLoops.length;
+
+    // Update user statistics
     if (status === "VALID") {
-      loopsDetected = (await getRunLoops(runId)).length;
-      
-      // Update the user's aggregated stats
-      await updateUserStats(userId, distanceKm, loopsDetected);
+      await updateUserStats(userId, distanceKm, loopsCount);
     }
+
+    // Attach polygon coords for the frontend summary screen
+    const loops = rawLoops.map(loop => ({
+      ...loop,
+      polygonCoords: wktPolygonToCoords(loop.polygon_wkt),
+    }));
 
     return res.status(200).json({
       run:          finishedRun,
       totalPoints:  points.length,
       distanceKm,
-      status: finishedRun.status,
-      fraudScore: run.fraud_score,
-      loopsDetected,
+      status:       finishedRun.status,
+      fraudScore:   run.fraud_score,
+      loopsDetected: loopsCount,
+      loops,        // full details for the summary screen
     });
   } catch (error) {
     console.error(error);
